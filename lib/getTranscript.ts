@@ -1,4 +1,4 @@
-const TRANSCRIPT_SERVICE_URL = "http://localhost:8000/transcript";
+const TRANSCRIPT_SERVICE_URL = "https://viral-parsing-production.up.railway.app/transcript";
 
 export async function getTranscript(videoId: string): Promise<string | null> {
   try {
