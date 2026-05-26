@@ -38,6 +38,7 @@ type ScriptPanelState = {
   mergeLoading: boolean;
   mergeStatus: string | null;
   mergeError: string | null;
+  openFootageIndex: number | null;
 };
 
 const FOOTAGE_DEFAULTS = {
@@ -49,6 +50,7 @@ const FOOTAGE_DEFAULTS = {
   mergeLoading: false,
   mergeStatus: null,
   mergeError: null,
+  openFootageIndex: null,
 };
 
 const RAILWAY_MERGE_URL =
@@ -59,6 +61,7 @@ function proxyUrl(url: string): string {
 }
 
 async function fetchPexelsClipBlob(pexelsUrl: string): Promise<Blob> {
+  console.log("downloading clip url:", pexelsUrl);
   const res = await fetch(proxyUrl(pexelsUrl));
 
   if (!res.ok) {
@@ -248,26 +251,14 @@ function getFootageQueries(script: ScriptResult, clipMode: ClipMode): string[] {
     .slice(0, 7);
 }
 
-async function getAudioDurationFromBlob(audioBlob: Blob): Promise<number> {
-  const arrayBuffer = await audioBlob.arrayBuffer();
-  const audioContext = new AudioContext();
-
-  try {
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
-    return audioBuffer.duration;
-  } finally {
-    await audioContext.close();
-  }
-}
-
 function getClipDurations(
   clipMode: ClipMode,
   audioDuration: number,
   selectedClips: SearchVideoResult[],
-  sentencesCount: number
+  sentencesLength: number
 ): number[] {
   if (clipMode === "sentences") {
-    const count = sentencesCount > 0 ? sentencesCount : selectedClips.length;
+    const count = sentencesLength > 0 ? sentencesLength : selectedClips.length;
     const perClipDuration = count > 0 ? audioDuration / count : audioDuration;
     return selectedClips.map(() => perClipDuration);
   }
@@ -375,6 +366,7 @@ export default function Home() {
     {}
   );
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(3);
 
   const handleSearch = async () => {
     if (!keyword.trim()) {
@@ -384,9 +376,10 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
+    setOpenVideoId(null);
     setVideos([]);
     setScripts({});
-    setOpenVideoId(null);
+    setVisibleCount(3);
 
     const searchPayload = {
       keyword: keyword.trim(),
@@ -521,6 +514,7 @@ export default function Home() {
         ...prev[videoId],
         footageLoading: true,
         footageError: null,
+        openFootageIndex: null,
         footageGroups: trimmedQueries.map((query) => ({
           query,
           videos: [],
@@ -841,13 +835,19 @@ export default function Home() {
         })
       );
 
-      const audioDuration = await getAudioDurationFromBlob(audioBlob);
-      const sentencesCount = panel.data?.sentences.length ?? selectedClips.length;
+      const audioContext = new AudioContext();
+      const audioBuffer = await audioContext.decodeAudioData(
+        await audioBlob.arrayBuffer()
+      );
+      const audioDuration = audioBuffer.duration;
+      await audioContext.close();
+
+      const sentencesLength = panel.data?.sentences.length ?? 0;
       const clipDurations = getClipDurations(
         panel.clipMode,
         audioDuration,
         selectedClips,
-        sentencesCount
+        sentencesLength
       );
 
       setScripts((prev) => ({
@@ -860,6 +860,7 @@ export default function Home() {
 
       const formData = new FormData();
       formData.append("audio", audioBlob, "audio.mp3");
+      formData.append("audio_duration", String(audioDuration));
       clipBlobs.forEach((clipBlob, index) => {
         formData.append("clips", clipBlob, `clip_${index}.mp4`);
       });
@@ -1122,7 +1123,7 @@ export default function Home() {
           )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {videos.map((video) => {
+            {videos.slice(0, visibleCount).map((video) => {
               const panel = scripts[video.videoId];
               return (
               <article
@@ -1374,7 +1375,7 @@ export default function Home() {
                                       <p className="text-xs text-zinc-500">
                                         Видео не найдены
                                       </p>
-                                    ) : (
+                                    ) : queryIndex === panel.openFootageIndex ? (
                                       <div className="space-y-2">
                                         <LazyFootageVideo
                                           videoUrl={activeVideo.url}
@@ -1398,6 +1399,22 @@ export default function Home() {
                                           </button>
                                         )}
                                       </div>
+                                    ) : (
+                                      <img
+                                        src={activeVideo.preview}
+                                        alt=""
+                                        loading="lazy"
+                                        onClick={() =>
+                                          setScripts((prev) => ({
+                                            ...prev,
+                                            [video.videoId]: {
+                                              ...prev[video.videoId],
+                                              openFootageIndex: queryIndex,
+                                            },
+                                          }))
+                                        }
+                                        className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-zinc-700 object-cover opacity-60 transition-opacity hover:opacity-100"
+                                      />
                                     )}
                                   </div>
                                   );
@@ -1466,6 +1483,16 @@ export default function Home() {
             );
             })}
           </div>
+
+          {videos.length > visibleCount && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((prev) => prev + 3)}
+              className="w-full rounded-lg border border-zinc-700 py-3 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+            >
+              Смотреть ещё ({videos.length - visibleCount} видео)
+            </button>
+          )}
         </div>
       </main>
     </div>

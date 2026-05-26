@@ -129,6 +129,7 @@ async def merge_video(
     audio: UploadFile = File(...),
     clips: list[UploadFile] = File(...),
     durations: list[float] = Form(...),
+    audio_duration: float = Form(...),
 ):
     if not clips:
         raise HTTPException(status_code=400, detail="At least one clip is required")
@@ -171,7 +172,8 @@ async def merge_video(
             "ffmpeg", "-i", str(merged_video), "-i", str(audio_path),
             "-c:v", "copy", "-c:a", "aac",
             "-map", "0:v:0", "-map", "1:a:0",
-            "-shortest", str(output_path),
+            "-t", str(audio_duration),
+            str(output_path),
         ], check=True)
 
         persist_dir = Path(tempfile.mkdtemp(prefix="merge_out_"))
