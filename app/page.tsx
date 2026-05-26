@@ -51,24 +51,15 @@ const FOOTAGE_DEFAULTS = {
 const MERGE_SERVICE_URL =
   "https://viral-parsing-production.up.railway.app/merge";
 
-function proxyVideoUrl(url: string): string {
-  return `/api/proxy-video?url=${encodeURIComponent(url)}`;
+function proxyUrl(url: string): string {
+  return `/api/proxy?url=${encodeURIComponent(url)}`;
 }
 
-function proxyAudioUrl(url: string): string {
-  return `/api/proxy-audio?url=${encodeURIComponent(url)}`;
-}
-
-async function fetchProxiedBlob(
-  url: string,
-  kind: "video" | "audio"
-): Promise<Blob> {
-  const proxyUrl =
-    kind === "video" ? proxyVideoUrl(url) : proxyAudioUrl(url);
-  const res = await fetch(proxyUrl);
+async function fetchProxiedBlob(url: string): Promise<Blob> {
+  const res = await fetch(proxyUrl(url));
 
   if (!res.ok) {
-    throw new Error(`Не удалось загрузить ${kind === "video" ? "видео" : "аудио"}`);
+    throw new Error("Не удалось загрузить файл");
   }
 
   return res.blob();
@@ -297,7 +288,7 @@ function LazyFootageVideo({
         <video
           ref={videoRef}
           key={videoUrl}
-          src={proxyVideoUrl(videoUrl)}
+          src={proxyUrl(videoUrl)}
           poster={poster}
           muted
           loop
@@ -780,7 +771,7 @@ export default function Home() {
       if (panel.voiceAudioBlob) {
         audioBlob = panel.voiceAudioBlob;
       } else if (panel.voiceAudioUrl?.startsWith("http")) {
-        audioBlob = await fetchProxiedBlob(panel.voiceAudioUrl, "audio");
+        audioBlob = await fetchProxiedBlob(panel.voiceAudioUrl);
       } else if (panel.voiceAudioUrl) {
         const audioRes = await fetch(panel.voiceAudioUrl);
         if (!audioRes.ok) {
@@ -794,7 +785,7 @@ export default function Home() {
       const clipBlobs = await Promise.all(
         selectedClips.map(async (clip, index) => {
           try {
-            return await fetchProxiedBlob(clip.url, "video");
+            return await fetchProxiedBlob(clip.url);
           } catch {
             throw new Error(`Не удалось скачать клип ${index + 1}`);
           }
