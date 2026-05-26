@@ -506,18 +506,6 @@ export default function Home() {
     }
   };
 
-  const handleScriptToggle = (video: ViralVideoResult) => {
-    const id = video.videoId;
-
-    if (openVideoId === id) {
-      setOpenVideoId(null);
-      return;
-    }
-
-    setOpenVideoId(id);
-    void handleGenerateScript(video);
-  };
-
   const loadFootageForVideo = async (
     videoId: string,
     queries: string[]
@@ -1178,7 +1166,14 @@ export default function Home() {
                   </a>
                   <button
                     type="button"
-                    onClick={() => handleScriptToggle(video)}
+                    onClick={() => {
+                      if (openVideoId === video.videoId) {
+                        setOpenVideoId(null);
+                      } else {
+                        setOpenVideoId(video.videoId);
+                        void handleGenerateScript(video);
+                      }
+                    }}
                     className="w-full rounded-md border border-zinc-600 bg-zinc-800 py-2 text-center text-sm text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-700"
                   >
                     {openVideoId === video.videoId
@@ -1187,9 +1182,9 @@ export default function Home() {
                   </button>
                 </div>
 
-                {openVideoId === video.videoId && panel && (
+                {openVideoId === video.videoId && (
                   <div className="border-t border-zinc-800 bg-zinc-950/80 p-4">
-                    {panel.loading && (
+                    {(!panel || panel.loading) && (
                       <div className="flex items-center justify-center gap-3 py-6">
                         <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
                         <span className="text-sm text-zinc-400">
@@ -1198,11 +1193,11 @@ export default function Home() {
                       </div>
                     )}
 
-                    {panel.error && !panel.loading && (
+                    {panel?.error && !panel.loading && (
                       <p className="text-sm text-red-400">{panel.error}</p>
                     )}
 
-                    {panel.data && !panel.loading && (
+                    {panel?.data && !panel.loading && (
                       <div className="space-y-4 text-sm">
                         <p className="text-xs text-zinc-500">
                           {panel.data.transcriptUsed
