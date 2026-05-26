@@ -154,10 +154,9 @@ async def merge_video(
             duration = durations[i] if i < len(durations) else 10
             trimmed_path = tmpdir / f"clip_{i}_trimmed.mp4"
             subprocess.run([
-                "ffmpeg", "-i", str(clip_path),
+                "ffmpeg", "-ss", "0", "-i", str(clip_path),
                 "-t", str(duration),
-                "-c:v", "libx264", "-preset", "fast",
-                "-c:a", "aac",
+                "-c", "copy",
                 "-avoid_negative_ts", "1",
                 str(trimmed_path),
             ], check=True, capture_output=True)
@@ -172,7 +171,7 @@ async def merge_video(
         subprocess.run([
             "ffmpeg", "-f", "concat", "-safe", "0",
             "-i", str(list_file),
-            "-c:v", "libx264", "-preset", "fast",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
             "-c:a", "aac",
             str(merged_video),
         ], check=True, capture_output=True)
