@@ -13,6 +13,7 @@ export type ScriptResult = {
   body: string;
   cta: string;
   visualHook: string;
+  videoQueries: string[];
   transcriptUsed: boolean;
 };
 
@@ -56,10 +57,25 @@ ${ctaInstruction}
 4. ВИЗУАЛЬНЫЙ ХУК:
 Что показать в первый кадр (без лица, текст на экране).
 
+5. ПОИСКОВЫЕ ЗАПРОСЫ ДЛЯ PEXELS (на английском):
+5-7 коротких запросов для поиска стокового видео. Запросы должны описывать визуальный ряд для каждой части сценария: хук, основная часть, CTA. Формулируй конкретно и визуально, как для поиска на Pexels. Пример: "woman looking at scale disappointed", "healthy food close up", "woman smiling mirror".
+
 Отвечай структурированно, на русском языке.
 
 В конце верни ТОЛЬКО валидный JSON (без markdown и пояснений) в формате:
-{"hooks":["текст хука 1","текст хука 2","текст хука 3"],"body":"основная часть","cta":"призыв к действию","visualHook":"визуальный хук"}`;
+{"hooks":["текст хука 1","текст хука 2","текст хука 3"],"body":"основная часть","cta":"призыв к действию","visualHook":"визуальный хук","videoQueries":["query 1","query 2","query 3","query 4","query 5"]}`;
+}
+
+function normalizeVideoQueries(queries: unknown): string[] {
+  if (!Array.isArray(queries)) {
+    return [];
+  }
+
+  return queries
+    .map(String)
+    .map((q) => q.trim())
+    .filter(Boolean)
+    .slice(0, 7);
 }
 
 function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed"> {
@@ -75,6 +91,7 @@ function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed">
           body: String(parsed.body),
           cta: String(parsed.cta),
           visualHook: String(parsed.visualHook),
+          videoQueries: normalizeVideoQueries(parsed.videoQueries),
         };
       }
     } catch {
@@ -91,6 +108,17 @@ function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed">
   );
   const ctaMatch = text.match(/CTA[^:]*:?\s*([^\n]+(?:\n(?!4\.)[^\n]+)*)/i);
   const visualMatch = text.match(/ВИЗУАЛЬНЫЙ ХУК[^:]*:?\s*([^\n]+(?:\n[^\n]+)*)/i);
+  const videoQueriesMatch = text.match(
+    /ПОИСКОВЫЕ ЗАПРОСЫ[^:]*:?\s*([\s\S]*?)(?=Отвечай|$)/i
+  );
+
+  const fallbackVideoQueries = videoQueriesMatch?.[1]
+    ? Array.from(
+        videoQueriesMatch[1].matchAll(/["']([^"']+)["']|[-•]\s*([^\n]+)/g)
+      )
+        .map((m) => (m[1] ?? m[2]).trim())
+        .filter(Boolean)
+    : [];
 
   return {
     hooks:
@@ -100,6 +128,7 @@ function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed">
     body: bodyMatch?.[1]?.trim() ?? text.slice(0, 500),
     cta: ctaMatch?.[1]?.trim() ?? "",
     visualHook: visualMatch?.[1]?.trim() ?? "",
+    videoQueries: normalizeVideoQueries(fallbackVideoQueries),
   };
 }
 
@@ -123,7 +152,7 @@ async function generateWithClaude(
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 2000,
+      max_tokens: 2500,
       messages: [{ role: "user", content: prompt }],
     }),
   });

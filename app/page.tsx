@@ -2,12 +2,20 @@
 
 import { useState } from "react";
 import type { ScriptResult } from "./api/generate-script/route";
+import type { SearchVideoResult } from "./api/search-videos/route";
 import type {
   Period,
   SortBy,
   VideoLanguage,
   ViralVideoResult,
 } from "./api/search-youtube/route";
+
+type FootageGroup = {
+  query: string;
+  videos: SearchVideoResult[];
+  loading: boolean;
+  selectedId: number | null;
+};
 
 type ScriptPanelState = {
   open: boolean;
@@ -20,6 +28,17 @@ type ScriptPanelState = {
   voiceLoading: boolean;
   voiceError: string | null;
   voiceAudioUrl: string | null;
+  footageLoading: boolean;
+  footageError: string | null;
+  footageGroups: FootageGroup[];
+  customFootageQuery: string;
+};
+
+const FOOTAGE_DEFAULTS = {
+  footageLoading: false,
+  footageError: null,
+  footageGroups: [] as FootageGroup[],
+  customFootageQuery: "",
 };
 
 const LANGUAGE_OPTIONS: { code: VideoLanguage; label: string }[] = [
@@ -144,6 +163,41 @@ function toggleLanguage(
   return [...current, code];
 }
 
+async function searchFootageVideos(
+  queries: string[]
+): Promise<SearchVideoResult[]> {
+  const res = await fetch("/api/search-videos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ queries }),
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data.error ?? "Ошибка поиска видео");
+  }
+
+  return data as SearchVideoResult[];
+}
+
+function buildFootageGroups(
+  queries: string[],
+  results: SearchVideoResult[],
+  previousGroups: FootageGroup[] = []
+): FootageGroup[] {
+  return queries.map((query) => {
+    const previous = previousGroups.find((group) => group.query === query);
+
+    return {
+      query,
+      videos: results.filter((video) => video.query === query),
+      loading: false,
+      selectedId: previous?.selectedId ?? null,
+    };
+  });
+}
+
 export default function Home() {
   const [keyword, setKeyword] = useState("");
   const [offer, setOffer] = useState("");
@@ -247,6 +301,7 @@ export default function Home() {
         voiceLoading: false,
         voiceError: null,
         voiceAudioUrl: null,
+        ...FOOTAGE_DEFAULTS,
       },
     }));
 
@@ -268,12 +323,14 @@ export default function Home() {
         throw new Error(data.error ?? "Ошибка генерации сценария");
       }
 
+      const scriptData = data as ScriptResult;
+
       setScripts((prev) => ({
         ...prev,
         [id]: {
           open: true,
           loading: false,
-          data: data as ScriptResult,
+          data: scriptData,
           error: null,
           selectedHook: null,
           copiedHook: null,
@@ -281,8 +338,13 @@ export default function Home() {
           voiceLoading: false,
           voiceError: null,
           voiceAudioUrl: null,
+          ...FOOTAGE_DEFAULTS,
         },
       }));
+
+      if (scriptData.videoQueries?.length) {
+        void loadFootageForVideo(id, scriptData.videoQueries);
+      }
     } catch (err) {
       setScripts((prev) => ({
         ...prev,
@@ -298,8 +360,202 @@ export default function Home() {
           voiceLoading: false,
           voiceError: null,
           voiceAudioUrl: null,
+          ...FOOTAGE_DEFAULTS,
         },
       }));
+    }
+  };
+
+  const loadFootageForVideo = async (
+    videoId: string,
+    queries: string[]
+  ) => {
+    const trimmedQueries = queries.map((query) => query.trim()).filter(Boolean);
+    if (trimmedQueries.length === 0) {
+      return;
+    }
+
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        footageLoading: true,
+        footageError: null,
+        footageGroups: trimmedQueries.map((query) => ({
+          query,
+          videos: [],
+          loading: true,
+          selectedId: null,
+        })),
+      },
+    }));
+
+    try {
+      const results = await searchFootageVideos(trimmedQueries);
+
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          footageLoading: false,
+          footageError: null,
+          footageGroups: buildFootageGroups(
+            trimmedQueries,
+            results,
+            prev[videoId]?.footageGroups ?? []
+          ),
+        },
+      }));
+    } catch (err) {
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          footageLoading: false,
+          footageError:
+            err instanceof Error ? err.message : "Ошибка поиска видео",
+        },
+      }));
+    }
+  };
+
+  const handleRefreshFootageQuery = async (
+    videoId: string,
+    queryIndex: number
+  ) => {
+    const group = scripts[videoId]?.footageGroups[queryIndex];
+    if (!group) {
+      return;
+    }
+
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        footageError: null,
+        footageGroups: prev[videoId].footageGroups.map((item, index) =>
+          index === queryIndex ? { ...item, loading: true } : item
+        ),
+      },
+    }));
+
+    try {
+      const results = await searchFootageVideos([group.query]);
+
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          footageGroups: prev[videoId].footageGroups.map((item, index) =>
+            index === queryIndex
+              ? {
+                  ...item,
+                  videos: results,
+                  loading: false,
+                  selectedId: null,
+                }
+              : item
+          ),
+        },
+      }));
+    } catch (err) {
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          footageError:
+            err instanceof Error ? err.message : "Ошибка поиска видео",
+          footageGroups: prev[videoId].footageGroups.map((item, index) =>
+            index === queryIndex ? { ...item, loading: false } : item
+          ),
+        },
+      }));
+    }
+  };
+
+  const handleSelectFootageVideo = (
+    videoId: string,
+    queryIndex: number,
+    footageVideoId: number
+  ) => {
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        footageGroups: prev[videoId].footageGroups.map((group, index) =>
+          index === queryIndex
+            ? { ...group, selectedId: footageVideoId }
+            : group
+        ),
+      },
+    }));
+  };
+
+  const handleCustomFootageQuery = async (videoId: string) => {
+    const query = scripts[videoId]?.customFootageQuery.trim();
+    if (!query) {
+      return;
+    }
+
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        customFootageQuery: "",
+        footageError: null,
+        footageGroups: [
+          ...prev[videoId].footageGroups,
+          {
+            query,
+            videos: [],
+            loading: true,
+            selectedId: null,
+          },
+        ],
+      },
+    }));
+
+    try {
+      const results = await searchFootageVideos([query]);
+
+      setScripts((prev) => {
+        const groups = [...prev[videoId].footageGroups];
+        const index = groups.findLastIndex(
+          (group) => group.query === query && group.loading
+        );
+
+        if (index >= 0) {
+          groups[index] = {
+            ...groups[index],
+            videos: results,
+            loading: false,
+          };
+        }
+
+        return {
+          ...prev,
+          [videoId]: {
+            ...prev[videoId],
+            footageGroups: groups,
+          },
+        };
+      });
+    } catch (err) {
+      setScripts((prev) => {
+        const groups = prev[videoId].footageGroups.filter(
+          (group) => !(group.query === query && group.loading)
+        );
+
+        return {
+          ...prev,
+          [videoId]: {
+            ...prev[videoId],
+            footageGroups: groups,
+            footageError:
+              err instanceof Error ? err.message : "Ошибка поиска видео",
+          },
+        };
+      });
     }
   };
 
@@ -700,6 +956,115 @@ export default function Home() {
                               </button>
                             ))}
                           </div>
+                        </div>
+
+                        <div>
+                          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+                            Видеоряд
+                          </h3>
+
+                          {panel.footageLoading && panel.footageGroups.length === 0 && (
+                            <div className="flex items-center gap-2 py-3">
+                              <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                              <span className="text-xs text-zinc-400">
+                                Ищем видео на Pexels…
+                              </span>
+                            </div>
+                          )}
+
+                          {panel.footageError && (
+                            <p className="mb-3 text-xs text-red-400">
+                              {panel.footageError}
+                            </p>
+                          )}
+
+                          <div className="space-y-4">
+                            {panel.footageGroups.map((group, queryIndex) => (
+                              <div key={`${group.query}-${queryIndex}`}>
+                                <div className="mb-2 flex items-start justify-between gap-2">
+                                  <p className="text-xs leading-snug text-zinc-400">
+                                    {group.query}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRefreshFootageQuery(
+                                        video.videoId,
+                                        queryIndex
+                                      )
+                                    }
+                                    disabled={group.loading}
+                                    className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+                                  >
+                                    Обновить
+                                  </button>
+                                </div>
+
+                                {group.loading ? (
+                                  <div className="flex justify-center py-4">
+                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                                  </div>
+                                ) : group.videos.length === 0 ? (
+                                  <p className="text-xs text-zinc-500">
+                                    Видео не найдены
+                                  </p>
+                                ) : (
+                                  <div className="grid grid-cols-3 gap-2">
+                                    {group.videos.map((footageVideo) => (
+                                      <button
+                                        key={footageVideo.id}
+                                        type="button"
+                                        onClick={() =>
+                                          handleSelectFootageVideo(
+                                            video.videoId,
+                                            queryIndex,
+                                            footageVideo.id
+                                          )
+                                        }
+                                        className={`overflow-hidden rounded-lg border transition-colors ${
+                                          group.selectedId === footageVideo.id
+                                            ? "border-amber-500 ring-2 ring-amber-500/40"
+                                            : "border-zinc-700 hover:border-zinc-500"
+                                        }`}
+                                      >
+                                        <video
+                                          src={footageVideo.url}
+                                          poster={footageVideo.preview}
+                                          muted
+                                          autoPlay
+                                          loop
+                                          playsInline
+                                          className="aspect-[9/16] w-full bg-zinc-900 object-cover"
+                                        />
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          <input
+                            type="text"
+                            value={panel.customFootageQuery}
+                            onChange={(e) =>
+                              setScripts((prev) => ({
+                                ...prev,
+                                [video.videoId]: {
+                                  ...prev[video.videoId],
+                                  customFootageQuery: e.target.value,
+                                },
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void handleCustomFootageQuery(video.videoId);
+                              }
+                            }}
+                            placeholder="Свой запрос для Pexels, Enter — поиск"
+                            className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+                          />
                         </div>
 
                         <div>
