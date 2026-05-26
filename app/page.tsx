@@ -796,7 +796,7 @@ export default function Home() {
         ...prev,
         [videoId]: {
           ...prev[videoId],
-          mergeStatus: "Склеиваем...",
+          mergeStatus: "Склеиваем видео, это займёт 1-2 минуты...",
         },
       }));
 
@@ -806,10 +806,19 @@ export default function Home() {
         formData.append("clips", clipBlob, `clip_${index}.mp4`);
       });
 
-      const mergeRes = await fetch(MERGE_SERVICE_URL, {
-        method: "POST",
-        body: formData,
-      });
+      const mergeController = new AbortController();
+      const mergeTimeoutId = setTimeout(() => mergeController.abort(), 120_000);
+
+      let mergeRes: Response;
+      try {
+        mergeRes = await fetch(MERGE_SERVICE_URL, {
+          method: "POST",
+          body: formData,
+          signal: mergeController.signal,
+        });
+      } finally {
+        clearTimeout(mergeTimeoutId);
+      }
 
       if (!mergeRes.ok) {
         let errorMessage = "Ошибка склейки видео";
@@ -850,14 +859,20 @@ export default function Home() {
         }));
       }, 3000);
     } catch (err) {
+      const message =
+        err instanceof Error && err.name === "AbortError"
+          ? "Превышено время ожидания склейки (2 мин)"
+          : err instanceof Error
+            ? err.message
+            : "Ошибка создания видео";
+
       setScripts((prev) => ({
         ...prev,
         [videoId]: {
           ...prev[videoId],
           mergeLoading: false,
           mergeStatus: null,
-          mergeError:
-            err instanceof Error ? err.message : "Ошибка создания видео",
+          mergeError: message,
         },
       }));
     }

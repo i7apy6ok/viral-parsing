@@ -1,3 +1,5 @@
+export const maxDuration = 60;
+
 import { proxyMediaRequest } from "@/lib/proxyMedia";
 
 export async function GET(request: Request) {
