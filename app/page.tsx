@@ -803,6 +803,9 @@ export default function Home() {
       clipBlobs.forEach((clipBlob, index) => {
         formData.append("clips", clipBlob, `clip_${index}.mp4`);
       });
+      selectedClips.forEach((clip) => {
+        formData.append("durations", String(clip.duration));
+      });
 
       const mergeController = new AbortController();
       const mergeTimeoutId = setTimeout(() => mergeController.abort(), 120_000);

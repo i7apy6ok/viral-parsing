@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -128,6 +128,7 @@ def upload_suffix(upload: UploadFile, default: str) -> str:
 async def merge_video(
     audio: UploadFile = File(...),
     clips: list[UploadFile] = File(...),
+    durations: list[float] = Form(...),
 ):
     if not clips:
         raise HTTPException(status_code=400, detail="At least one clip is required")
@@ -143,10 +144,11 @@ async def merge_video(
             clip_path = tmpdir / f"clip_{i}{upload_suffix(clip, '.mp4')}"
             await save_upload(clip, clip_path)
 
+            duration = durations[i] if i < len(durations) else 10
             trimmed_path = tmpdir / f"clip_{i}_trimmed.mp4"
             subprocess.run([
                 "ffmpeg", "-i", str(clip_path),
-                "-t", "10",
+                "-t", str(duration),
                 "-c", "copy",
                 str(trimmed_path),
             ], check=True)
