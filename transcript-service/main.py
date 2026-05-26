@@ -142,7 +142,15 @@ async def merge_video(
         for i, clip in enumerate(clips):
             clip_path = tmpdir / f"clip_{i}{upload_suffix(clip, '.mp4')}"
             await save_upload(clip, clip_path)
-            clip_paths.append(clip_path)
+
+            trimmed_path = tmpdir / f"clip_{i}_trimmed.mp4"
+            subprocess.run([
+                "ffmpeg", "-i", str(clip_path),
+                "-t", "10",
+                "-c", "copy",
+                str(trimmed_path),
+            ], check=True)
+            clip_paths.append(trimmed_path)
 
         list_file = tmpdir / "clips.txt"
         with open(list_file, "w", encoding="utf-8") as f:
