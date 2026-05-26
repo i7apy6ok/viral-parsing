@@ -9,9 +9,27 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+import requests
 from starlette.background import BackgroundTask
 
 app = FastAPI(title="Transcript Service")
+
+DOWNLOAD_HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+
+def download_file(url: str, path: Path) -> None:
+    response = requests.get(
+        url,
+        headers=DOWNLOAD_HEADERS,
+        stream=True,
+        timeout=120,
+    )
+    response.raise_for_status()
+
+    with open(path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
 
 
 class TranscriptRequest(BaseModel):
@@ -117,13 +135,13 @@ async def merge_video(body: MergeRequest):
 
         # Скачиваем аудио
         audio_path = tmpdir / "audio.mp3"
-        subprocess.run(["wget", "-q", "-O", str(audio_path), body.audio_url], check=True)
+        download_file(body.audio_url, audio_path)
 
         # Скачиваем видео клипы
         clip_paths = []
         for i, url in enumerate(body.video_clips):
             clip_path = tmpdir / f"clip_{i}.mp4"
-            subprocess.run(["wget", "-q", "-O", str(clip_path), url], check=True)
+            download_file(url, clip_path)
             clip_paths.append(clip_path)
 
         # Создаём список файлов для concat
