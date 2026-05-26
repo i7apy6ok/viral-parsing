@@ -32,6 +32,9 @@ type ScriptPanelState = {
   footageError: string | null;
   footageGroups: FootageGroup[];
   customFootageQuery: string;
+  mergeLoading: boolean;
+  mergeStatus: string | null;
+  mergeError: string | null;
 };
 
 const FOOTAGE_DEFAULTS = {
@@ -39,7 +42,13 @@ const FOOTAGE_DEFAULTS = {
   footageError: null,
   footageGroups: [] as FootageGroup[],
   customFootageQuery: "",
+  mergeLoading: false,
+  mergeStatus: null,
+  mergeError: null,
 };
+
+const MERGE_SERVICE_URL =
+  "https://viral-parsing-production.up.railway.app/merge";
 
 const LANGUAGE_OPTIONS: { code: VideoLanguage; label: string }[] = [
   { code: "ru", label: "🇷🇺 Русский" },
@@ -196,6 +205,24 @@ function buildFootageGroups(
       selectedIndex: previous?.selectedIndex ?? 0,
     };
   });
+}
+
+function getSelectedFootageClips(groups: FootageGroup[]): SearchVideoResult[] {
+  return groups
+    .filter((group) => !group.loading && group.videos.length > 0)
+    .map(
+      (group) =>
+        group.videos[group.selectedIndex % group.videos.length]
+    );
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function Home() {
@@ -615,6 +642,123 @@ export default function Home() {
           voiceError:
             err instanceof Error ? err.message : "Ошибка озвучки",
           voiceAudioUrl: null,
+        },
+      }));
+    }
+  };
+
+  const handleDownloadVideo = async (videoId: string) => {
+    const panel = scripts[videoId];
+    if (!panel?.voiceAudioUrl) {
+      return;
+    }
+
+    const selectedClips = getSelectedFootageClips(panel.footageGroups);
+    if (selectedClips.length === 0) {
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          mergeError: "Нет выбранных видеоклипов",
+          mergeStatus: null,
+        },
+      }));
+      return;
+    }
+
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        mergeLoading: true,
+        mergeStatus: "Скачиваем файлы...",
+        mergeError: null,
+      },
+    }));
+
+    try {
+      const audioRes = await fetch(panel.voiceAudioUrl);
+      if (!audioRes.ok) {
+        throw new Error("Не удалось скачать аудио");
+      }
+      const audioBlob = await audioRes.blob();
+
+      const clipBlobs = await Promise.all(
+        selectedClips.map(async (clip, index) => {
+          const clipRes = await fetch(clip.url);
+          if (!clipRes.ok) {
+            throw new Error(`Не удалось скачать клип ${index + 1}`);
+          }
+          return clipRes.blob();
+        })
+      );
+
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          mergeStatus: "Склеиваем...",
+        },
+      }));
+
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "audio.mp3");
+      clipBlobs.forEach((clipBlob, index) => {
+        formData.append("clips", clipBlob, `clip_${index}.mp4`);
+      });
+
+      const mergeRes = await fetch(MERGE_SERVICE_URL, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!mergeRes.ok) {
+        let errorMessage = "Ошибка склейки видео";
+        try {
+          const data = await mergeRes.json();
+          if (typeof data.detail === "string") {
+            errorMessage = data.detail;
+          } else if (typeof data.error === "string") {
+            errorMessage = data.error;
+          }
+        } catch {
+          errorMessage = `Ошибка склейки: ${mergeRes.status}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const resultBlob = await mergeRes.blob();
+
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          mergeLoading: false,
+          mergeStatus: "Готово!",
+          mergeError: null,
+        },
+      }));
+
+      downloadBlob(resultBlob, "result.mp4");
+
+      setTimeout(() => {
+        setScripts((prev) => ({
+          ...prev,
+          [videoId]: {
+            ...prev[videoId],
+            mergeStatus: null,
+          },
+        }));
+      }, 3000);
+    } catch (err) {
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          mergeLoading: false,
+          mergeStatus: null,
+          mergeError:
+            err instanceof Error ? err.message : "Ошибка создания видео",
         },
       }));
     }
@@ -1088,6 +1232,36 @@ export default function Home() {
                                 placeholder="Свой запрос для Pexels, Enter — поиск"
                                 className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
                               />
+
+                              <button
+                                type="button"
+                                onClick={() => void handleDownloadVideo(video.videoId)}
+                                disabled={
+                                  panel.mergeLoading ||
+                                  panel.footageLoading ||
+                                  getSelectedFootageClips(panel.footageGroups)
+                                    .length === 0
+                                }
+                                className="mt-4 w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {panel.mergeLoading
+                                  ? panel.mergeStatus ?? "Скачиваем..."
+                                  : "Скачать видео"}
+                              </button>
+
+                              {panel.mergeError && (
+                                <p className="mt-2 text-xs text-red-400">
+                                  {panel.mergeError}
+                                </p>
+                              )}
+
+                              {panel.mergeStatus &&
+                                !panel.mergeLoading &&
+                                panel.mergeStatus === "Готово!" && (
+                                  <p className="mt-2 text-xs text-emerald-400">
+                                    {panel.mergeStatus}
+                                  </p>
+                                )}
                             </div>
                           </>
                         )}
