@@ -249,6 +249,33 @@ function getFootageQueries(script: ScriptResult, clipMode: ClipMode): string[] {
     .slice(0, 7);
 }
 
+async function getAudioDurationFromBlob(audioBlob: Blob): Promise<number> {
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  const audioContext = new AudioContext();
+
+  try {
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    return audioBuffer.duration;
+  } finally {
+    await audioContext.close();
+  }
+}
+
+function getClipDurations(
+  clipMode: ClipMode,
+  audioDuration: number,
+  selectedClips: SearchVideoResult[],
+  sentencesCount: number
+): number[] {
+  if (clipMode === "sentences") {
+    const count = sentencesCount > 0 ? sentencesCount : selectedClips.length;
+    const perClipDuration = count > 0 ? audioDuration / count : audioDuration;
+    return selectedClips.map(() => perClipDuration);
+  }
+
+  return selectedClips.map((clip) => clip.duration);
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -828,6 +855,15 @@ export default function Home() {
         })
       );
 
+      const audioDuration = await getAudioDurationFromBlob(audioBlob);
+      const sentencesCount = panel.data?.sentences.length ?? selectedClips.length;
+      const clipDurations = getClipDurations(
+        panel.clipMode,
+        audioDuration,
+        selectedClips,
+        sentencesCount
+      );
+
       setScripts((prev) => ({
         ...prev,
         [videoId]: {
@@ -841,8 +877,8 @@ export default function Home() {
       clipBlobs.forEach((clipBlob, index) => {
         formData.append("clips", clipBlob, `clip_${index}.mp4`);
       });
-      selectedClips.forEach((clip) => {
-        formData.append("durations", String(clip.duration));
+      clipDurations.forEach((duration) => {
+        formData.append("durations", String(duration));
       });
 
       const mergeController = new AbortController();
