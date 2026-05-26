@@ -134,67 +134,73 @@ async def merge_video(
     if not clips:
         raise HTTPException(status_code=400, detail="At least one clip is required")
 
-    with tempfile.TemporaryDirectory(prefix="merge_") as tmpdir:
-        tmpdir = Path(tmpdir)
+    try:
+        with tempfile.TemporaryDirectory(prefix="merge_") as tmpdir:
+            tmpdir = Path(tmpdir)
 
-        audio_path = tmpdir / f"audio{upload_suffix(audio, '.mp3')}"
-        await save_upload(audio, audio_path)
+            audio_path = tmpdir / f"audio{upload_suffix(audio, '.mp3')}"
+            await save_upload(audio, audio_path)
 
-        clip_paths: list[Path] = []
-        for i, clip in enumerate(clips):
-            clip_path = tmpdir / f"clip_{i}{upload_suffix(clip, '.mp4')}"
-            await save_upload(clip, clip_path)
+            clip_paths: list[Path] = []
+            for i, clip in enumerate(clips):
+                clip_path = tmpdir / f"clip_{i}{upload_suffix(clip, '.mp4')}"
+                await save_upload(clip, clip_path)
 
-            if clip_path.stat().st_size < 1000:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Clip {i} is too small or empty",
-                )
+                if clip_path.stat().st_size < 1000:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Clip {i} is too small or empty",
+                    )
 
-            duration = durations[i] if i < len(durations) else 10
-            normalized_path = tmpdir / f"clip_{i}_norm.mp4"
+                duration = durations[i] if i < len(durations) else 10
+                normalized_path = tmpdir / f"clip_{i}_norm.mp4"
+                subprocess.run([
+                    "ffmpeg", "-i", str(clip_path),
+                    "-t", str(duration),
+                    "-r", "30",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                    "-c:a", "aac", "-ar", "44100",
+                    "-ac", "2",
+                    "-y", str(normalized_path),
+                ], check=True, capture_output=True)
+                clip_paths.append(normalized_path)
+
+            list_file = tmpdir / "clips.txt"
+            with open(list_file, "w", encoding="utf-8") as f:
+                for clip_path in clip_paths:
+                    f.write(f"file '{clip_path.as_posix()}'\n")
+
+            merged_video = tmpdir / "merged.mp4"
             subprocess.run([
-                "ffmpeg", "-i", str(clip_path),
-                "-t", str(duration),
-                "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-                "-r", "30",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                "-c:a", "aac", "-ar", "44100",
-                "-y", str(normalized_path),
+                "ffmpeg", "-f", "concat", "-safe", "0",
+                "-i", str(list_file),
+                "-c", "copy",
+                "-y", str(merged_video),
             ], check=True, capture_output=True)
-            clip_paths.append(normalized_path)
 
-        list_file = tmpdir / "clips.txt"
-        with open(list_file, "w", encoding="utf-8") as f:
-            for clip_path in clip_paths:
-                f.write(f"file '{clip_path.as_posix()}'\n")
+            output_path = tmpdir / "output.mp4"
+            subprocess.run([
+                "ffmpeg", "-i", str(merged_video), "-i", str(audio_path),
+                "-c:v", "copy", "-c:a", "aac",
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-t", str(audio_duration),
+                "-y", str(output_path),
+            ], check=True, capture_output=True)
 
-        merged_video = tmpdir / "merged.mp4"
-        subprocess.run([
-            "ffmpeg", "-f", "concat", "-safe", "0",
-            "-i", str(list_file),
-            "-c", "copy",
-            "-y", str(merged_video),
-        ], check=True, capture_output=True)
+            persist_dir = Path(tempfile.mkdtemp(prefix="merge_out_"))
+            persist_path = persist_dir / "result.mp4"
+            shutil.copy2(output_path, persist_path)
 
-        output_path = tmpdir / "output.mp4"
-        subprocess.run([
-            "ffmpeg", "-i", str(merged_video), "-i", str(audio_path),
-            "-c:v", "copy", "-c:a", "aac",
-            "-map", "0:v:0", "-map", "1:a:0",
-            "-t", str(audio_duration),
-            str(output_path),
-        ], check=True)
-
-        persist_dir = Path(tempfile.mkdtemp(prefix="merge_out_"))
-        persist_path = persist_dir / "result.mp4"
-        shutil.copy2(output_path, persist_path)
-
-        return FileResponse(
-            str(persist_path),
-            media_type="video/mp4",
-            filename="result.mp4",
-            background=BackgroundTask(shutil.rmtree, persist_dir, ignore_errors=True),
+            return FileResponse(
+                str(persist_path),
+                media_type="video/mp4",
+                filename="result.mp4",
+                background=BackgroundTask(shutil.rmtree, persist_dir, ignore_errors=True),
+            )
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"ffmpeg error: {e.stderr.decode() if e.stderr else str(e)}",
         )
 
 
