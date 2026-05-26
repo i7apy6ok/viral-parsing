@@ -152,15 +152,17 @@ async def merge_video(
                 )
 
             duration = durations[i] if i < len(durations) else 10
-            trimmed_path = tmpdir / f"clip_{i}_trimmed.mp4"
+            normalized_path = tmpdir / f"clip_{i}_norm.mp4"
             subprocess.run([
-                "ffmpeg", "-ss", "0", "-i", str(clip_path),
+                "ffmpeg", "-i", str(clip_path),
                 "-t", str(duration),
-                "-c", "copy",
-                "-avoid_negative_ts", "1",
-                str(trimmed_path),
+                "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+                "-r", "30",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                "-c:a", "aac", "-ar", "44100",
+                "-y", str(normalized_path),
             ], check=True, capture_output=True)
-            clip_paths.append(trimmed_path)
+            clip_paths.append(normalized_path)
 
         list_file = tmpdir / "clips.txt"
         with open(list_file, "w", encoding="utf-8") as f:
@@ -171,9 +173,8 @@ async def merge_video(
         subprocess.run([
             "ffmpeg", "-f", "concat", "-safe", "0",
             "-i", str(list_file),
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-            "-c:a", "aac",
-            str(merged_video),
+            "-c", "copy",
+            "-y", str(merged_video),
         ], check=True, capture_output=True)
 
         output_path = tmpdir / "output.mp4"
