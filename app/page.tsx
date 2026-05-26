@@ -17,6 +17,8 @@ type FootageGroup = {
   selectedIndex: number;
 };
 
+type ClipMode = "sentences" | "blocks";
+
 type ScriptPanelState = {
   open: boolean;
   loading: boolean;
@@ -33,6 +35,7 @@ type ScriptPanelState = {
   footageError: string | null;
   footageGroups: FootageGroup[];
   customFootageQuery: string;
+  clipMode: ClipMode;
   mergeLoading: boolean;
   mergeStatus: string | null;
   mergeError: string | null;
@@ -43,6 +46,7 @@ const FOOTAGE_DEFAULTS = {
   footageError: null,
   footageGroups: [] as FootageGroup[],
   customFootageQuery: "",
+  clipMode: "sentences" as const,
   mergeLoading: false,
   mergeStatus: null,
   mergeError: null,
@@ -229,6 +233,20 @@ function getSelectedFootageClips(groups: FootageGroup[]): SearchVideoResult[] {
       (group) =>
         group.videos[group.selectedIndex % group.videos.length]
     );
+}
+
+function getFootageQueries(script: ScriptResult, clipMode: ClipMode): string[] {
+  if (clipMode === "sentences") {
+    return script.sentences
+      .map((sentence) => sentence.trim())
+      .filter(Boolean)
+      .slice(0, 7);
+  }
+
+  return script.videoQueries
+    .map((query) => query.trim())
+    .filter(Boolean)
+    .slice(0, 7);
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -718,8 +736,9 @@ export default function Home() {
         },
       }));
 
-      if (script.videoQueries?.length) {
-        void loadFootageForVideo(videoId, script.videoQueries);
+      const queries = getFootageQueries(script, "sentences");
+      if (queries.length) {
+        void loadFootageForVideo(videoId, queries);
       }
     } catch (err) {
       setScripts((prev) => ({
@@ -733,6 +752,25 @@ export default function Home() {
           voiceAudioBlob: null,
         },
       }));
+    }
+  };
+
+  const handleClipModeChange = (
+    videoId: string,
+    clipMode: ClipMode,
+    script: ScriptResult
+  ) => {
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        clipMode,
+      },
+    }));
+
+    const queries = getFootageQueries(script, clipMode);
+    if (queries.length) {
+      void loadFootageForVideo(videoId, queries);
     }
   };
 
@@ -1242,6 +1280,22 @@ export default function Home() {
                               controls
                               src={panel.voiceAudioUrl}
                               className="w-full"
+                            />
+
+                            <ToggleGroup
+                              label="Режим подбора футажа"
+                              value={panel.clipMode}
+                              onChange={(mode) =>
+                                handleClipModeChange(
+                                  video.videoId,
+                                  mode,
+                                  panel.data!
+                                )
+                              }
+                              options={[
+                                { value: "sentences", label: "По предложению" },
+                                { value: "blocks", label: "По блокам" },
+                              ]}
                             />
 
                             <div>

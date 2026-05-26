@@ -14,6 +14,7 @@ export type ScriptResult = {
   cta: string;
   visualHook: string;
   videoQueries: string[];
+  sentences: string[];
   transcriptUsed: boolean;
 };
 
@@ -60,10 +61,31 @@ ${ctaInstruction}
 5. ПОИСКОВЫЕ ЗАПРОСЫ ДЛЯ PEXELS (на английском):
 5-7 коротких запросов для поиска стокового видео. Запросы должны описывать визуальный ряд для каждой части сценария: хук, основная часть, CTA. Формулируй конкретно и визуально, как для поиска на Pexels. Пример: "woman looking at scale disappointed", "healthy food close up", "woman smiling mirror".
 
+6. ПРЕДЛОЖЕНИЯ (sentences):
+Разбей основную часть (body) на отдельные предложения — каждое предложение отдельный элемент массива sentences.
+
 Отвечай структурированно, на русском языке.
 
 В конце верни ТОЛЬКО валидный JSON (без markdown и пояснений) в формате:
-{"hooks":["текст хука 1","текст хука 2","текст хука 3"],"body":"основная часть","cta":"призыв к действию","visualHook":"визуальный хук","videoQueries":["query 1","query 2","query 3","query 4","query 5"]}`;
+{"hooks":["текст хука 1","текст хука 2","текст хука 3"],"body":"основная часть","cta":"призыв к действию","visualHook":"визуальный хук","videoQueries":["query 1","query 2","query 3","query 4","query 5"],"sentences":["Предложение 1.","Предложение 2.","Предложение 3."]}`;
+}
+
+function splitBodyToSentences(body: string): string[] {
+  return body
+    .split(/[.!?]+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function normalizeSentences(sentences: unknown, body: string): string[] {
+  if (Array.isArray(sentences) && sentences.length > 0) {
+    return sentences
+      .map(String)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean);
+  }
+
+  return splitBodyToSentences(body);
 }
 
 function normalizeVideoQueries(queries: unknown): string[] {
@@ -86,12 +108,14 @@ function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed">
         Omit<ScriptResult, "transcriptUsed">
       >;
       if (parsed.hooks && parsed.body && parsed.cta && parsed.visualHook) {
+        const body = String(parsed.body);
         return {
           hooks: parsed.hooks.slice(0, 3).map(String),
-          body: String(parsed.body),
+          body,
           cta: String(parsed.cta),
           visualHook: String(parsed.visualHook),
           videoQueries: normalizeVideoQueries(parsed.videoQueries),
+          sentences: normalizeSentences(parsed.sentences, body),
         };
       }
     } catch {
@@ -120,15 +144,18 @@ function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed">
         .filter(Boolean)
     : [];
 
+  const body = bodyMatch?.[1]?.trim() ?? text.slice(0, 500);
+
   return {
     hooks:
       hookMatches.length >= 3
         ? hookMatches.slice(0, 3)
         : ["", "", ""].map((_, i) => hookMatches[i] ?? `Хук ${i + 1}`),
-    body: bodyMatch?.[1]?.trim() ?? text.slice(0, 500),
+    body,
     cta: ctaMatch?.[1]?.trim() ?? "",
     visualHook: visualMatch?.[1]?.trim() ?? "",
     videoQueries: normalizeVideoQueries(fallbackVideoQueries),
+    sentences: splitBodyToSentences(body),
   };
 }
 
