@@ -14,7 +14,7 @@ type FootageGroup = {
   query: string;
   videos: SearchVideoResult[];
   loading: boolean;
-  selectedId: number | null;
+  selectedIndex: number;
 };
 
 type ScriptPanelState = {
@@ -193,7 +193,7 @@ function buildFootageGroups(
       query,
       videos: results.filter((video) => video.query === query),
       loading: false,
-      selectedId: previous?.selectedId ?? null,
+      selectedIndex: previous?.selectedIndex ?? 0,
     };
   });
 }
@@ -341,10 +341,6 @@ export default function Home() {
           ...FOOTAGE_DEFAULTS,
         },
       }));
-
-      if (scriptData.videoQueries?.length) {
-        void loadFootageForVideo(id, scriptData.videoQueries);
-      }
     } catch (err) {
       setScripts((prev) => ({
         ...prev,
@@ -385,7 +381,7 @@ export default function Home() {
           query,
           videos: [],
           loading: true,
-          selectedId: null,
+          selectedIndex: 0,
         })),
       },
     }));
@@ -419,74 +415,21 @@ export default function Home() {
     }
   };
 
-  const handleRefreshFootageQuery = async (
-    videoId: string,
-    queryIndex: number
-  ) => {
-    const group = scripts[videoId]?.footageGroups[queryIndex];
-    if (!group) {
-      return;
-    }
-
+  const handleCycleFootageVideo = (videoId: string, queryIndex: number) => {
     setScripts((prev) => ({
       ...prev,
       [videoId]: {
         ...prev[videoId],
-        footageError: null,
-        footageGroups: prev[videoId].footageGroups.map((item, index) =>
-          index === queryIndex ? { ...item, loading: true } : item
-        ),
-      },
-    }));
+        footageGroups: prev[videoId].footageGroups.map((group, index) => {
+          if (index !== queryIndex || group.videos.length === 0) {
+            return group;
+          }
 
-    try {
-      const results = await searchFootageVideos([group.query]);
-
-      setScripts((prev) => ({
-        ...prev,
-        [videoId]: {
-          ...prev[videoId],
-          footageGroups: prev[videoId].footageGroups.map((item, index) =>
-            index === queryIndex
-              ? {
-                  ...item,
-                  videos: results,
-                  loading: false,
-                  selectedId: null,
-                }
-              : item
-          ),
-        },
-      }));
-    } catch (err) {
-      setScripts((prev) => ({
-        ...prev,
-        [videoId]: {
-          ...prev[videoId],
-          footageError:
-            err instanceof Error ? err.message : "Ошибка поиска видео",
-          footageGroups: prev[videoId].footageGroups.map((item, index) =>
-            index === queryIndex ? { ...item, loading: false } : item
-          ),
-        },
-      }));
-    }
-  };
-
-  const handleSelectFootageVideo = (
-    videoId: string,
-    queryIndex: number,
-    footageVideoId: number
-  ) => {
-    setScripts((prev) => ({
-      ...prev,
-      [videoId]: {
-        ...prev[videoId],
-        footageGroups: prev[videoId].footageGroups.map((group, index) =>
-          index === queryIndex
-            ? { ...group, selectedId: footageVideoId }
-            : group
-        ),
+          return {
+            ...group,
+            selectedIndex: (group.selectedIndex + 1) % group.videos.length,
+          };
+        }),
       },
     }));
   };
@@ -509,7 +452,7 @@ export default function Home() {
             query,
             videos: [],
             loading: true,
-            selectedId: null,
+            selectedIndex: 0,
           },
         ],
       },
@@ -621,6 +564,7 @@ export default function Home() {
         voiceLoading: true,
         voiceError: null,
         voiceAudioUrl: null,
+        ...FOOTAGE_DEFAULTS,
       },
     }));
 
@@ -658,6 +602,10 @@ export default function Home() {
           voiceAudioUrl: audioUrl,
         },
       }));
+
+      if (script.videoQueries?.length) {
+        void loadFootageForVideo(videoId, script.videoQueries);
+      }
     } catch (err) {
       setScripts((prev) => ({
         ...prev,
@@ -959,115 +907,6 @@ export default function Home() {
                         </div>
 
                         <div>
-                          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                            Видеоряд
-                          </h3>
-
-                          {panel.footageLoading && panel.footageGroups.length === 0 && (
-                            <div className="flex items-center gap-2 py-3">
-                              <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                              <span className="text-xs text-zinc-400">
-                                Ищем видео на Pexels…
-                              </span>
-                            </div>
-                          )}
-
-                          {panel.footageError && (
-                            <p className="mb-3 text-xs text-red-400">
-                              {panel.footageError}
-                            </p>
-                          )}
-
-                          <div className="space-y-4">
-                            {panel.footageGroups.map((group, queryIndex) => (
-                              <div key={`${group.query}-${queryIndex}`}>
-                                <div className="mb-2 flex items-start justify-between gap-2">
-                                  <p className="text-xs leading-snug text-zinc-400">
-                                    {group.query}
-                                  </p>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleRefreshFootageQuery(
-                                        video.videoId,
-                                        queryIndex
-                                      )
-                                    }
-                                    disabled={group.loading}
-                                    className="shrink-0 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
-                                  >
-                                    Обновить
-                                  </button>
-                                </div>
-
-                                {group.loading ? (
-                                  <div className="flex justify-center py-4">
-                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                                  </div>
-                                ) : group.videos.length === 0 ? (
-                                  <p className="text-xs text-zinc-500">
-                                    Видео не найдены
-                                  </p>
-                                ) : (
-                                  <div className="grid grid-cols-3 gap-2">
-                                    {group.videos.map((footageVideo) => (
-                                      <button
-                                        key={footageVideo.id}
-                                        type="button"
-                                        onClick={() =>
-                                          handleSelectFootageVideo(
-                                            video.videoId,
-                                            queryIndex,
-                                            footageVideo.id
-                                          )
-                                        }
-                                        className={`overflow-hidden rounded-lg border transition-colors ${
-                                          group.selectedId === footageVideo.id
-                                            ? "border-amber-500 ring-2 ring-amber-500/40"
-                                            : "border-zinc-700 hover:border-zinc-500"
-                                        }`}
-                                      >
-                                        <video
-                                          src={footageVideo.url}
-                                          poster={footageVideo.preview}
-                                          muted
-                                          autoPlay
-                                          loop
-                                          playsInline
-                                          className="aspect-[9/16] w-full bg-zinc-900 object-cover"
-                                        />
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-
-                          <input
-                            type="text"
-                            value={panel.customFootageQuery}
-                            onChange={(e) =>
-                              setScripts((prev) => ({
-                                ...prev,
-                                [video.videoId]: {
-                                  ...prev[video.videoId],
-                                  customFootageQuery: e.target.value,
-                                },
-                              }))
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                void handleCustomFootageQuery(video.videoId);
-                              }
-                            }}
-                            placeholder="Свой запрос для Pexels, Enter — поиск"
-                            className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
-                          />
-                        </div>
-
-                        <div>
                           <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
                             Основная часть
                           </h3>
@@ -1138,11 +977,119 @@ export default function Home() {
                         )}
 
                         {panel.voiceAudioUrl && !panel.voiceLoading && (
-                          <audio
-                            controls
-                            src={panel.voiceAudioUrl}
-                            className="w-full"
-                          />
+                          <>
+                            <audio
+                              controls
+                              src={panel.voiceAudioUrl}
+                              className="w-full"
+                            />
+
+                            <div>
+                              <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+                                Видеоряд
+                              </h3>
+
+                              {panel.footageLoading &&
+                                panel.footageGroups.length === 0 && (
+                                  <div className="flex items-center gap-2 py-3">
+                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                                    <span className="text-xs text-zinc-400">
+                                      Ищем видео на Pexels…
+                                    </span>
+                                  </div>
+                                )}
+
+                              {panel.footageError && (
+                                <p className="mb-3 text-xs text-red-400">
+                                  {panel.footageError}
+                                </p>
+                              )}
+
+                              <div className="space-y-4">
+                                {panel.footageGroups.map((group, queryIndex) => {
+                                  const activeVideo =
+                                    group.videos.length > 0
+                                      ? group.videos[
+                                          group.selectedIndex %
+                                            group.videos.length
+                                        ]
+                                      : null;
+
+                                  return (
+                                  <div key={`${group.query}-${queryIndex}`}>
+                                    <p className="mb-2 text-xs leading-snug text-zinc-400">
+                                      {group.query}
+                                    </p>
+
+                                    {group.loading ? (
+                                      <div className="flex justify-center py-4">
+                                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                                      </div>
+                                    ) : !activeVideo ? (
+                                      <p className="text-xs text-zinc-500">
+                                        Видео не найдены
+                                      </p>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        <div className="mx-auto max-w-[180px] overflow-hidden rounded-lg border border-zinc-700">
+                                          <video
+                                            key={activeVideo.id}
+                                            src={activeVideo.url}
+                                            poster={activeVideo.preview}
+                                            muted
+                                            autoPlay
+                                            loop
+                                            playsInline
+                                            className="aspect-[9/16] w-full bg-zinc-900 object-cover"
+                                          />
+                                        </div>
+                                        <p className="text-xs text-zinc-500">
+                                          {activeVideo.duration} сек
+                                        </p>
+                                        {group.videos.length > 1 && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleCycleFootageVideo(
+                                                video.videoId,
+                                                queryIndex
+                                              )
+                                            }
+                                            className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                                          >
+                                            Подобрать другой фрагмент
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                  );
+                                })}
+                              </div>
+
+                              <input
+                                type="text"
+                                value={panel.customFootageQuery}
+                                onChange={(e) =>
+                                  setScripts((prev) => ({
+                                    ...prev,
+                                    [video.videoId]: {
+                                      ...prev[video.videoId],
+                                      customFootageQuery: e.target.value,
+                                    },
+                                  }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    void handleCustomFootageQuery(video.videoId);
+                                  }
+                                }}
+                                placeholder="Свой запрос для Pexels, Enter — поиск"
+                                className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+                              />
+                            </div>
+                          </>
                         )}
                       </div>
                     )}
