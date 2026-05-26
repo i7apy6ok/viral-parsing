@@ -145,14 +145,22 @@ async def merge_video(
             clip_path = tmpdir / f"clip_{i}{upload_suffix(clip, '.mp4')}"
             await save_upload(clip, clip_path)
 
+            if clip_path.stat().st_size < 1000:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Clip {i} is too small or empty",
+                )
+
             duration = durations[i] if i < len(durations) else 10
             trimmed_path = tmpdir / f"clip_{i}_trimmed.mp4"
             subprocess.run([
                 "ffmpeg", "-i", str(clip_path),
                 "-t", str(duration),
-                "-c", "copy",
+                "-c:v", "libx264", "-preset", "fast",
+                "-c:a", "aac",
+                "-avoid_negative_ts", "1",
                 str(trimmed_path),
-            ], check=True)
+            ], check=True, capture_output=True)
             clip_paths.append(trimmed_path)
 
         list_file = tmpdir / "clips.txt"
@@ -163,9 +171,11 @@ async def merge_video(
         merged_video = tmpdir / "merged.mp4"
         subprocess.run([
             "ffmpeg", "-f", "concat", "-safe", "0",
-            "-i", str(list_file), "-c", "copy",
+            "-i", str(list_file),
+            "-c:v", "libx264", "-preset", "fast",
+            "-c:a", "aac",
             str(merged_video),
-        ], check=True)
+        ], check=True, capture_output=True)
 
         output_path = tmpdir / "output.mp4"
         subprocess.run([
