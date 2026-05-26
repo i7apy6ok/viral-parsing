@@ -241,14 +241,12 @@ function getFootageQueries(script: ScriptResult, clipMode: ClipMode): string[] {
   if (clipMode === "sentences") {
     return script.sentences
       .map((sentence) => sentence.trim())
-      .filter(Boolean)
-      .slice(0, 7);
+      .filter(Boolean);
   }
 
   return script.videoQueries
     .map((query) => query.trim())
-    .filter(Boolean)
-    .slice(0, 7);
+    .filter(Boolean);
 }
 
 function getClipDurations(

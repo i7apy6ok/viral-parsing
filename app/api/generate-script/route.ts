@@ -59,7 +59,7 @@ ${ctaInstruction}
 Что показать в первый кадр (без лица, текст на экране).
 
 5. ПОИСКОВЫЕ ЗАПРОСЫ ДЛЯ PEXELS (на английском):
-5-7 коротких запросов для поиска стокового видео. Запросы должны описывать визуальный ряд для каждой части сценария: хук, основная часть, CTA. Формулируй конкретно и визуально, как для поиска на Pexels. Пример: "woman looking at scale disappointed", "healthy food close up", "woman smiling mirror".
+7-15 коротких запросов, по одному на каждое предложение основной части. Запросы должны описывать визуальный ряд для каждой части сценария: хук, основная часть, CTA. Формулируй конкретно и визуально, как для поиска на Pexels. Пример: "woman looking at scale disappointed", "healthy food close up", "woman smiling mirror".
 
 6. ПРЕДЛОЖЕНИЯ (sentences):
 Разбей основную часть (body) на отдельные предложения — каждое предложение отдельный элемент массива sentences.
@@ -96,8 +96,7 @@ function normalizeVideoQueries(queries: unknown): string[] {
   return queries
     .map(String)
     .map((q) => q.trim())
-    .filter(Boolean)
-    .slice(0, 7);
+    .filter(Boolean);
 }
 
 function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed"> {
