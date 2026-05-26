@@ -6,30 +6,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-import requests
 from starlette.background import BackgroundTask
 
 app = FastAPI(title="Transcript Service")
-
-DOWNLOAD_HEADERS = {"User-Agent": "Mozilla/5.0"}
-
-
-def download_file(url: str, path: Path) -> None:
-    response = requests.get(
-        url,
-        headers=DOWNLOAD_HEADERS,
-        stream=True,
-        timeout=120,
-    )
-    response.raise_for_status()
-
-    with open(path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
 
 
 class TranscriptRequest(BaseModel):
@@ -123,48 +105,55 @@ def transcript(body: TranscriptRequest):
     return {"transcript": transcript_text}
 
 
-class MergeRequest(BaseModel):
-    audio_url: str
-    video_clips: list[str]  # список URL видео с Pexels
+async def save_upload(upload: UploadFile, path: Path) -> None:
+    with open(path, "wb") as f:
+        while chunk := await upload.read(8192):
+            f.write(chunk)
+
+
+def upload_suffix(upload: UploadFile, default: str) -> str:
+    suffix = Path(upload.filename or "").suffix
+    return suffix if suffix else default
 
 
 @app.post("/merge")
-async def merge_video(body: MergeRequest):
+async def merge_video(
+    audio: UploadFile = File(...),
+    clips: list[UploadFile] = File(...),
+):
+    if not clips:
+        raise HTTPException(status_code=400, detail="At least one clip is required")
+
     with tempfile.TemporaryDirectory(prefix="merge_") as tmpdir:
         tmpdir = Path(tmpdir)
 
-        # Скачиваем аудио
-        audio_path = tmpdir / "audio.mp3"
-        download_file(body.audio_url, audio_path)
+        audio_path = tmpdir / f"audio{upload_suffix(audio, '.mp3')}"
+        await save_upload(audio, audio_path)
 
-        # Скачиваем видео клипы
-        clip_paths = []
-        for i, url in enumerate(body.video_clips):
-            clip_path = tmpdir / f"clip_{i}.mp4"
-            download_file(url, clip_path)
+        clip_paths: list[Path] = []
+        for i, clip in enumerate(clips):
+            clip_path = tmpdir / f"clip_{i}{upload_suffix(clip, '.mp4')}"
+            await save_upload(clip, clip_path)
             clip_paths.append(clip_path)
 
-        # Создаём список файлов для concat
         list_file = tmpdir / "clips.txt"
-        with open(list_file, "w") as f:
-            for p in clip_paths:
-                f.write(f"file '{p}'\n")
+        with open(list_file, "w", encoding="utf-8") as f:
+            for clip_path in clip_paths:
+                f.write(f"file '{clip_path.as_posix()}'\n")
 
-        # Склеиваем видео
         merged_video = tmpdir / "merged.mp4"
         subprocess.run([
             "ffmpeg", "-f", "concat", "-safe", "0",
             "-i", str(list_file), "-c", "copy",
-            str(merged_video)
+            str(merged_video),
         ], check=True)
 
-        # Накладываем аудио
         output_path = tmpdir / "output.mp4"
         subprocess.run([
             "ffmpeg", "-i", str(merged_video), "-i", str(audio_path),
             "-c:v", "copy", "-c:a", "aac",
             "-map", "0:v:0", "-map", "1:a:0",
-            "-shortest", str(output_path)
+            "-shortest", str(output_path),
         ], check=True)
 
         persist_dir = Path(tempfile.mkdtemp(prefix="merge_out_"))
