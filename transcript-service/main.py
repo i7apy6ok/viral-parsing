@@ -157,9 +157,10 @@ async def merge_video(
                 subprocess.run([
                     "ffmpeg", "-i", str(clip_path),
                     "-t", str(duration),
-                    "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black",
-                    "-r", "30",
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                    "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:-1:-1:color=black",
+                    "-r", "25",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32",
+                    "-threads", "1",
                     "-c:a", "aac", "-ar", "44100", "-ac", "2",
                     "-y", str(normalized_path),
                 ], check=True, capture_output=True)
