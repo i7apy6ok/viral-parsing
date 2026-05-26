@@ -7,11 +7,19 @@ import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 app = FastAPI(title="Transcript Service")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class TranscriptRequest(BaseModel):
