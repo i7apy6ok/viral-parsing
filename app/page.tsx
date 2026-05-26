@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ScriptResult } from "./api/generate-script/route";
 import type { SearchVideoResult } from "./api/search-videos/route";
 import type {
@@ -28,6 +28,7 @@ type ScriptPanelState = {
   voiceLoading: boolean;
   voiceError: string | null;
   voiceAudioUrl: string | null;
+  voiceAudioBlob: Blob | null;
   footageLoading: boolean;
   footageError: string | null;
   footageGroups: FootageGroup[];
@@ -49,6 +50,29 @@ const FOOTAGE_DEFAULTS = {
 
 const MERGE_SERVICE_URL =
   "https://viral-parsing-production.up.railway.app/merge";
+
+function proxyVideoUrl(url: string): string {
+  return `/api/proxy-video?url=${encodeURIComponent(url)}`;
+}
+
+function proxyAudioUrl(url: string): string {
+  return `/api/proxy-audio?url=${encodeURIComponent(url)}`;
+}
+
+async function fetchProxiedBlob(
+  url: string,
+  kind: "video" | "audio"
+): Promise<Blob> {
+  const proxyUrl =
+    kind === "video" ? proxyVideoUrl(url) : proxyAudioUrl(url);
+  const res = await fetch(proxyUrl);
+
+  if (!res.ok) {
+    throw new Error(`Не удалось загрузить ${kind === "video" ? "видео" : "аудио"}`);
+  }
+
+  return res.blob();
+}
 
 const LANGUAGE_OPTIONS: { code: VideoLanguage; label: string }[] = [
   { code: "ru", label: "🇷🇺 Русский" },
@@ -225,6 +249,74 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function LazyFootageVideo({
+  videoUrl,
+  poster,
+}: {
+  videoUrl: string;
+  poster: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "120px" }
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible || !videoRef.current) {
+      return;
+    }
+
+    void videoRef.current.play().catch(() => {});
+  }, [isVisible, videoUrl]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="mx-auto max-w-[180px] overflow-hidden rounded-lg border border-zinc-700"
+    >
+      {isVisible ? (
+        <video
+          ref={videoRef}
+          key={videoUrl}
+          src={proxyVideoUrl(videoUrl)}
+          poster={poster}
+          muted
+          loop
+          playsInline
+          preload="none"
+          className="aspect-[9/16] w-full bg-zinc-900 object-cover"
+        />
+      ) : (
+        <img
+          src={poster}
+          alt=""
+          loading="lazy"
+          className="aspect-[9/16] w-full bg-zinc-900 object-cover"
+        />
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [keyword, setKeyword] = useState("");
   const [offer, setOffer] = useState("");
@@ -328,6 +420,7 @@ export default function Home() {
         voiceLoading: false,
         voiceError: null,
         voiceAudioUrl: null,
+        voiceAudioBlob: null,
         ...FOOTAGE_DEFAULTS,
       },
     }));
@@ -365,6 +458,7 @@ export default function Home() {
           voiceLoading: false,
           voiceError: null,
           voiceAudioUrl: null,
+          voiceAudioBlob: null,
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -383,6 +477,7 @@ export default function Home() {
           voiceLoading: false,
           voiceError: null,
           voiceAudioUrl: null,
+          voiceAudioBlob: null,
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -591,6 +686,7 @@ export default function Home() {
         voiceLoading: true,
         voiceError: null,
         voiceAudioUrl: null,
+        voiceAudioBlob: null,
         ...FOOTAGE_DEFAULTS,
       },
     }));
@@ -627,6 +723,7 @@ export default function Home() {
           voiceLoading: false,
           voiceError: null,
           voiceAudioUrl: audioUrl,
+          voiceAudioBlob: blob,
         },
       }));
 
@@ -642,6 +739,7 @@ export default function Home() {
           voiceError:
             err instanceof Error ? err.message : "Ошибка озвучки",
           voiceAudioUrl: null,
+          voiceAudioBlob: null,
         },
       }));
     }
@@ -649,7 +747,7 @@ export default function Home() {
 
   const handleDownloadVideo = async (videoId: string) => {
     const panel = scripts[videoId];
-    if (!panel?.voiceAudioUrl) {
+    if (!panel?.voiceAudioUrl && !panel?.voiceAudioBlob) {
       return;
     }
 
@@ -677,19 +775,29 @@ export default function Home() {
     }));
 
     try {
-      const audioRes = await fetch(panel.voiceAudioUrl);
-      if (!audioRes.ok) {
+      let audioBlob: Blob;
+
+      if (panel.voiceAudioBlob) {
+        audioBlob = panel.voiceAudioBlob;
+      } else if (panel.voiceAudioUrl?.startsWith("http")) {
+        audioBlob = await fetchProxiedBlob(panel.voiceAudioUrl, "audio");
+      } else if (panel.voiceAudioUrl) {
+        const audioRes = await fetch(panel.voiceAudioUrl);
+        if (!audioRes.ok) {
+          throw new Error("Не удалось скачать аудио");
+        }
+        audioBlob = await audioRes.blob();
+      } else {
         throw new Error("Не удалось скачать аудио");
       }
-      const audioBlob = await audioRes.blob();
 
       const clipBlobs = await Promise.all(
         selectedClips.map(async (clip, index) => {
-          const clipRes = await fetch(clip.url);
-          if (!clipRes.ok) {
+          try {
+            return await fetchProxiedBlob(clip.url, "video");
+          } catch {
             throw new Error(`Не удалось скачать клип ${index + 1}`);
           }
-          return clipRes.blob();
         })
       );
 
@@ -1175,18 +1283,10 @@ export default function Home() {
                                       </p>
                                     ) : (
                                       <div className="space-y-2">
-                                        <div className="mx-auto max-w-[180px] overflow-hidden rounded-lg border border-zinc-700">
-                                          <video
-                                            key={activeVideo.id}
-                                            src={activeVideo.url}
-                                            poster={activeVideo.preview}
-                                            muted
-                                            autoPlay
-                                            loop
-                                            playsInline
-                                            className="aspect-[9/16] w-full bg-zinc-900 object-cover"
-                                          />
-                                        </div>
+                                        <LazyFootageVideo
+                                          videoUrl={activeVideo.url}
+                                          poster={activeVideo.preview}
+                                        />
                                         <p className="text-xs text-zinc-500">
                                           {activeVideo.duration} сек
                                         </p>
