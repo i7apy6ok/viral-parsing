@@ -48,18 +48,18 @@ const FOOTAGE_DEFAULTS = {
   mergeError: null,
 };
 
-const MERGE_SERVICE_URL =
+const RAILWAY_MERGE_URL =
   "https://viral-parsing-production.up.railway.app/merge";
 
 function proxyUrl(url: string): string {
   return `/api/proxy?url=${encodeURIComponent(url)}`;
 }
 
-async function fetchProxiedBlob(url: string): Promise<Blob> {
-  const res = await fetch(proxyUrl(url));
+async function fetchPexelsClipBlob(pexelsUrl: string): Promise<Blob> {
+  const res = await fetch(proxyUrl(pexelsUrl));
 
   if (!res.ok) {
-    throw new Error("Не удалось загрузить файл");
+    throw new Error("Не удалось загрузить видеоклип");
   }
 
   return res.blob();
@@ -770,8 +770,6 @@ export default function Home() {
 
       if (panel.voiceAudioBlob) {
         audioBlob = panel.voiceAudioBlob;
-      } else if (panel.voiceAudioUrl?.startsWith("http")) {
-        audioBlob = await fetchProxiedBlob(panel.voiceAudioUrl);
       } else if (panel.voiceAudioUrl) {
         const audioRes = await fetch(panel.voiceAudioUrl);
         if (!audioRes.ok) {
@@ -785,7 +783,7 @@ export default function Home() {
       const clipBlobs = await Promise.all(
         selectedClips.map(async (clip, index) => {
           try {
-            return await fetchProxiedBlob(clip.url);
+            return await fetchPexelsClipBlob(clip.url);
           } catch {
             throw new Error(`Не удалось скачать клип ${index + 1}`);
           }
@@ -811,7 +809,8 @@ export default function Home() {
 
       let mergeRes: Response;
       try {
-        mergeRes = await fetch(MERGE_SERVICE_URL, {
+        // Напрямую на Railway из браузера — без Vercel API (долгий ответ)
+        mergeRes = await fetch(RAILWAY_MERGE_URL, {
           method: "POST",
           body: formData,
           signal: mergeController.signal,
