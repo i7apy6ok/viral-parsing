@@ -1,12 +1,15 @@
 import glob
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 app = FastAPI(title="Transcript Service")
 
@@ -100,6 +103,62 @@ def transcript(body: TranscriptRequest):
         )
 
     return {"transcript": transcript_text}
+
+
+class MergeRequest(BaseModel):
+    audio_url: str
+    video_clips: list[str]  # список URL видео с Pexels
+
+
+@app.post("/merge")
+async def merge_video(body: MergeRequest):
+    with tempfile.TemporaryDirectory(prefix="merge_") as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Скачиваем аудио
+        audio_path = tmpdir / "audio.mp3"
+        subprocess.run(["wget", "-q", "-O", str(audio_path), body.audio_url], check=True)
+
+        # Скачиваем видео клипы
+        clip_paths = []
+        for i, url in enumerate(body.video_clips):
+            clip_path = tmpdir / f"clip_{i}.mp4"
+            subprocess.run(["wget", "-q", "-O", str(clip_path), url], check=True)
+            clip_paths.append(clip_path)
+
+        # Создаём список файлов для concat
+        list_file = tmpdir / "clips.txt"
+        with open(list_file, "w") as f:
+            for p in clip_paths:
+                f.write(f"file '{p}'\n")
+
+        # Склеиваем видео
+        merged_video = tmpdir / "merged.mp4"
+        subprocess.run([
+            "ffmpeg", "-f", "concat", "-safe", "0",
+            "-i", str(list_file), "-c", "copy",
+            str(merged_video)
+        ], check=True)
+
+        # Накладываем аудио
+        output_path = tmpdir / "output.mp4"
+        subprocess.run([
+            "ffmpeg", "-i", str(merged_video), "-i", str(audio_path),
+            "-c:v", "copy", "-c:a", "aac",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-shortest", str(output_path)
+        ], check=True)
+
+        persist_dir = Path(tempfile.mkdtemp(prefix="merge_out_"))
+        persist_path = persist_dir / "result.mp4"
+        shutil.copy2(output_path, persist_path)
+
+        return FileResponse(
+            str(persist_path),
+            media_type="video/mp4",
+            filename="result.mp4",
+            background=BackgroundTask(shutil.rmtree, persist_dir, ignore_errors=True),
+        )
 
 
 if __name__ == "__main__":
