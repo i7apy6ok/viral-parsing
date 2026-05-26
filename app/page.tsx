@@ -20,7 +20,6 @@ type FootageGroup = {
 type ClipMode = "sentences" | "blocks";
 
 type ScriptPanelState = {
-  open: boolean;
   loading: boolean;
   data: ScriptResult | null;
   error: string | null;
@@ -375,6 +374,7 @@ export default function Home() {
   const [scripts, setScripts] = useState<Record<string, ScriptPanelState>>(
     {}
   );
+  const [openVideoId, setOpenVideoId] = useState<string | null>(null);
 
   const handleSearch = async () => {
     if (!keyword.trim()) {
@@ -386,6 +386,7 @@ export default function Home() {
     setError(null);
     setVideos([]);
     setScripts({});
+    setOpenVideoId(null);
 
     const searchPayload = {
       keyword: keyword.trim(),
@@ -427,26 +428,13 @@ export default function Home() {
     const id = video.videoId;
     const current = scripts[id];
 
-    if (current?.open) {
-      setScripts((prev) => ({
-        ...prev,
-        [id]: { ...current, open: false },
-      }));
-      return;
-    }
-
-    if (current?.data) {
-      setScripts((prev) => ({
-        ...prev,
-        [id]: { ...current, open: true },
-      }));
+    if (current?.data || current?.loading) {
       return;
     }
 
     setScripts((prev) => ({
       ...prev,
       [id]: {
-        open: true,
         loading: true,
         data: null,
         error: null,
@@ -484,7 +472,6 @@ export default function Home() {
       setScripts((prev) => ({
         ...prev,
         [id]: {
-          open: true,
           loading: false,
           data: scriptData,
           error: null,
@@ -502,7 +489,6 @@ export default function Home() {
       setScripts((prev) => ({
         ...prev,
         [id]: {
-          open: true,
           loading: false,
           data: null,
           error:
@@ -518,6 +504,18 @@ export default function Home() {
         },
       }));
     }
+  };
+
+  const handleScriptToggle = (video: ViralVideoResult) => {
+    const id = video.videoId;
+
+    if (openVideoId === id) {
+      setOpenVideoId(null);
+      return;
+    }
+
+    setOpenVideoId(id);
+    void handleGenerateScript(video);
   };
 
   const loadFootageForVideo = async (
@@ -1180,14 +1178,16 @@ export default function Home() {
                   </a>
                   <button
                     type="button"
-                    onClick={() => handleGenerateScript(video)}
+                    onClick={() => handleScriptToggle(video)}
                     className="w-full rounded-md border border-zinc-600 bg-zinc-800 py-2 text-center text-sm text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-700"
                   >
-                    {panel?.open ? "Скрыть сценарий" : "Создать сценарий"}
+                    {openVideoId === video.videoId
+                      ? "Скрыть сценарий"
+                      : "Создать сценарий"}
                   </button>
                 </div>
 
-                {panel?.open && (
+                {openVideoId === video.videoId && panel && (
                   <div className="border-t border-zinc-800 bg-zinc-950/80 p-4">
                     {panel.loading && (
                       <div className="flex items-center justify-center gap-3 py-6">
