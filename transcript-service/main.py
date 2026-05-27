@@ -11,6 +11,7 @@ from pathlib import Path
 
 import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from supabase import Client, create_client
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -116,15 +117,28 @@ def transcript(body: TranscriptRequest):
     return {"transcript": transcript_text}
 
 
-def upload_to_0x0_sync(file_path: Path) -> str:
-    with open(file_path, "rb") as f:
-        response = requests.post(
-            "https://0x0.st",
-            files={"file": (file_path.name, f, "audio/mpeg")},
-            timeout=60,
-        )
-        response.raise_for_status()
-        return response.text.strip()
+def upload_audio_to_supabase_sync(file_path: Path) -> str:
+    supabase = get_supabase()
+    filename = file_path.name
+    file_bytes = file_path.read_bytes()
+
+    supabase.storage.from_(AUDIO_TEMP_BUCKET).upload(
+        path=filename,
+        file=file_bytes,
+        file_options={"content-type": "audio/mpeg", "upsert": "true"},
+    )
+
+    public_url = supabase.storage.from_(AUDIO_TEMP_BUCKET).get_public_url(filename)
+    if isinstance(public_url, dict):
+        url = public_url.get("publicUrl") or public_url.get("publicURL")
+        if url:
+            return str(url).strip()
+    return str(public_url).strip()
+
+
+def remove_audio_from_supabase_sync(filename: str) -> None:
+    supabase = get_supabase()
+    supabase.storage.from_(AUDIO_TEMP_BUCKET).remove([filename])
 
 
 async def save_upload(upload: UploadFile, path: Path) -> None:
@@ -290,6 +304,8 @@ async def merge_video(
     if not RENDI_API_KEY:
         raise HTTPException(status_code=500, detail="RENDI_API_KEY not configured")
 
+    get_supabase()
+
     file_id = str(uuid.uuid4())
     audio_filename = f"{file_id}.mp3"
     audio_path = Path(f"/tmp/rendi_audio/{audio_filename}")
@@ -298,7 +314,7 @@ async def merge_video(
     try:
         await save_upload(audio, audio_path)
         audio_public_url = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: upload_to_0x0_sync(audio_path)
+            None, lambda: upload_audio_to_supabase_sync(audio_path)
         )
 
         output_url = merge_with_rendi(
@@ -309,6 +325,14 @@ async def merge_video(
             audio_public_url,
             audio_duration,
         )
+
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda: remove_audio_from_supabase_sync(audio_filename)
+            )
+        except Exception as cleanup_err:
+            logging.warning(f"Supabase audio cleanup failed: {cleanup_err}")
+
         return JSONResponse({"url": output_url})
     finally:
         audio_path.unlink(missing_ok=True)
