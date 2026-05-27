@@ -124,6 +124,97 @@ def upload_suffix(upload: UploadFile, default: str) -> str:
     return suffix if suffix else default
 
 
+def build_rendi_command(
+    clip_urls: list[str],
+    start_times: list[float],
+    durations: list[float],
+    audio_rendi_url: str,
+    audio_duration: float,
+) -> tuple[dict[str, str], dict[str, str], str]:
+    input_files: dict[str, str] = {}
+    for i, url in enumerate(clip_urls):
+        input_files[f"in_{i + 1}"] = url
+    input_files["in_audio"] = audio_rendi_url
+
+    cmd_parts: list[str] = []
+    for i, (start, duration) in enumerate(zip(start_times, durations)):
+        cmd_parts.extend([
+            "-ss", str(start), "-t", str(duration), "-i", f"{{{{in_{i + 1}}}}}",
+        ])
+    cmd_parts.extend(["-i", "{{in_audio}}"])
+
+    n = len(clip_urls)
+    filter_complex = ""
+    for i in range(n):
+        filter_complex += (
+            f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"pad=1080:1920:-1:-1:color=black,fps=30,setsar=1[v{i}];"
+        )
+    filter_complex += "".join(f"[v{i}]" for i in range(n))
+    filter_complex += f"concat=n={n}:v=1:a=0[vout]"
+
+    cmd_parts.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[vout]",
+        "-map", f"{n}:a:0",
+        "-t", str(audio_duration),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "aac", "-ar", "44100",
+        "-movflags", "+faststart",
+        "{{out_1}}",
+    ])
+
+    ffmpeg_command = " ".join(cmd_parts)
+    output_files = {"out_1": "output.mp4"}
+    return input_files, output_files, ffmpeg_command
+
+
+def merge_with_rendi(
+    rendi_api_key: str,
+    clip_urls: list[str],
+    start_times: list[float],
+    durations: list[float],
+    audio_rendi_url: str,
+    audio_duration: float,
+) -> str:
+    input_files, output_files, ffmpeg_command = build_rendi_command(
+        clip_urls,
+        start_times,
+        durations,
+        audio_rendi_url,
+        audio_duration,
+    )
+
+    job_response = requests.post(
+        "https://api.rendi.dev/v1/run-ffmpeg-command",
+        headers={"X-API-KEY": rendi_api_key},
+        json={
+            "input_files": input_files,
+            "output_files": output_files,
+            "ffmpeg_command": ffmpeg_command,
+        },
+        timeout=30,
+    )
+    job_response.raise_for_status()
+    job_id = job_response.json()["id"]
+
+    for _ in range(120):
+        time.sleep(5)
+        poll = requests.get(
+            f"https://api.rendi.dev/v1/commands/{job_id}",
+            headers={"X-API-KEY": rendi_api_key},
+            timeout=30,
+        )
+        poll.raise_for_status()
+        data = poll.json()
+        if data["status"] == "COMPLETED":
+            return data["output_files"]["out_1"]
+        if data["status"] == "FAILED":
+            raise HTTPException(status_code=500, detail=f"Rendi error: {data}")
+
+    raise HTTPException(status_code=504, detail="Rendi timeout after 10 minutes")
+
+
 @app.post("/merge")
 async def merge_video(
     audio: UploadFile = File(...),
@@ -160,57 +251,15 @@ async def merge_video(
         audio_upload.raise_for_status()
         audio_rendi_url = audio_upload.json()["url"]
 
-    command: list[str] = []
-    for url, start, duration in zip(clip_urls, start_times, durations):
-        command.extend(["-ss", str(start), "-t", str(duration), "-i", url])
-    command.extend(["-i", audio_rendi_url])
-
-    n = len(clip_urls)
-    filter_complex = ""
-    for i in range(n):
-        filter_complex += (
-            f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
-            f"pad=1080:1920:-1:-1:color=black,fps=30,setsar=1[v{i}];"
-        )
-    filter_complex += "".join(f"[v{i}]" for i in range(n))
-    filter_complex += f"concat=n={n}:v=1:a=0[vout]"
-
-    command.extend([
-        "-filter_complex", filter_complex,
-        "-map", "[vout]",
-        "-map", f"{n}:a:0",
-        "-t", str(audio_duration),
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-        "-c:a", "aac", "-ar", "44100",
-        "-movflags", "+faststart",
-        "output.mp4",
-    ])
-
-    job_response = requests.post(
-        "https://api.rendi.dev/v1/run-ffmpeg-command",
-        headers={"X-API-KEY": rendi_api_key},
-        json={"ffmpeg_command": command},
-        timeout=30,
+    output_url = merge_with_rendi(
+        rendi_api_key,
+        clip_urls,
+        start_times,
+        durations,
+        audio_rendi_url,
+        audio_duration,
     )
-    job_response.raise_for_status()
-    job_id = job_response.json()["id"]
-
-    for _ in range(120):
-        time.sleep(5)
-        poll = requests.get(
-            f"https://api.rendi.dev/v1/commands/{job_id}",
-            headers={"X-API-KEY": rendi_api_key},
-            timeout=30,
-        )
-        poll.raise_for_status()
-        data = poll.json()
-        if data["status"] == "COMPLETED":
-            output_url = data["outputs"]["output.mp4"]
-            return JSONResponse({"url": output_url})
-        if data["status"] == "FAILED":
-            raise HTTPException(status_code=500, detail=f"Rendi error: {data}")
-
-    raise HTTPException(status_code=504, detail="Rendi timeout after 10 minutes")
+    return JSONResponse({"url": output_url})
 
 
 if __name__ == "__main__":
