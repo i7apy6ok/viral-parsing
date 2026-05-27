@@ -186,6 +186,20 @@ def build_rendi_command(
     return input_files, output_files, ffmpeg_command
 
 
+def rendi_output_url(data: dict) -> str:
+    out = data.get("output_files", {}).get("out_1")
+    if isinstance(out, dict):
+        url = out.get("storage_url") or out.get("url")
+        if url:
+            return url
+    if isinstance(out, str):
+        return out
+    raise HTTPException(
+        status_code=500,
+        detail=f"Rendi output URL missing: {data.get('output_files')}",
+    )
+
+
 def merge_with_rendi(
     rendi_api_key: str,
     clip_urls: list[str],
@@ -224,20 +238,27 @@ def merge_with_rendi(
         )
         raise
 
-    job_id = job_response.json()["id"]
+    job_data = job_response.json()
+    command_id = job_data.get("command_id") or job_data.get("id")
+    if not command_id:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Rendi response missing command_id: {job_data}",
+        )
 
     for _ in range(120):
         time.sleep(5)
         poll = requests.get(
-            f"https://api.rendi.dev/v1/commands/{job_id}",
+            f"https://api.rendi.dev/v1/commands/{command_id}",
             headers={"X-API-KEY": rendi_api_key},
             timeout=30,
         )
         poll.raise_for_status()
         data = poll.json()
-        if data["status"] == "COMPLETED":
-            return data["output_files"]["out_1"]
-        if data["status"] == "FAILED":
+        status = data.get("status")
+        if status in ("COMPLETED", "SUCCESS"):
+            return rendi_output_url(data)
+        if status in ("FAILED", "ERROR"):
             raise HTTPException(status_code=500, detail=f"Rendi error: {data}")
 
     raise HTTPException(status_code=504, detail="Rendi timeout after 10 minutes")
