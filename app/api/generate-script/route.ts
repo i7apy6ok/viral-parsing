@@ -187,6 +187,9 @@ async function generateWithClaude(
   const baseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
   const url = `${baseUrl}/v1/messages`;
 
+  console.log("Claude request URL:", url);
+  console.log("Claude key prefix:", apiKey?.substring(0, 15));
+
   try {
     const res = await fetch(url, {
       method: "POST",
