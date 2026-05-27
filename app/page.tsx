@@ -60,17 +60,6 @@ function proxyUrl(url: string): string {
   return `/api/proxy?url=${encodeURIComponent(url)}`;
 }
 
-async function fetchPexelsClipBlob(pexelsUrl: string): Promise<Blob> {
-  console.log("downloading clip url:", pexelsUrl);
-  const res = await fetch(proxyUrl(pexelsUrl));
-
-  if (!res.ok) {
-    throw new Error("Не удалось загрузить видеоклип");
-  }
-
-  return res.blob();
-}
-
 const LANGUAGE_OPTIONS: { code: VideoLanguage; label: string }[] = [
   { code: "ru", label: "🇷🇺 Русский" },
   { code: "en", label: "🇺🇸 Английский" },
@@ -247,21 +236,6 @@ function getFootageQueries(script: ScriptResult, clipMode: ClipMode): string[] {
   return script.videoQueries
     .map((query) => query.trim())
     .filter(Boolean);
-}
-
-function getClipDurations(
-  clipMode: ClipMode,
-  audioDuration: number,
-  selectedClips: SearchVideoResult[],
-  sentencesLength: number
-): number[] {
-  if (clipMode === "sentences") {
-    const count = sentencesLength > 0 ? sentencesLength : selectedClips.length;
-    const perClipDuration = count > 0 ? audioDuration / count : audioDuration;
-    return selectedClips.map(() => perClipDuration);
-  }
-
-  return selectedClips.map((clip) => clip.duration);
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -803,7 +777,7 @@ export default function Home() {
       [videoId]: {
         ...prev[videoId],
         mergeLoading: true,
-        mergeStatus: "Скачиваем файлы...",
+        mergeStatus: "Склеиваем видео, это займёт несколько минут...",
         mergeError: null,
       },
     }));
@@ -823,16 +797,6 @@ export default function Home() {
         throw new Error("Не удалось скачать аудио");
       }
 
-      const clipBlobs = await Promise.all(
-        selectedClips.map(async (clip, index) => {
-          try {
-            return await fetchPexelsClipBlob(clip.url);
-          } catch {
-            throw new Error(`Не удалось скачать клип ${index + 1}`);
-          }
-        })
-      );
-
       const audioContext = new AudioContext();
       const audioBuffer = await audioContext.decodeAudioData(
         await audioBlob.arrayBuffer()
@@ -840,38 +804,22 @@ export default function Home() {
       const audioDuration = audioBuffer.duration;
       await audioContext.close();
 
-      const sentencesLength = panel.data?.sentences.length ?? 0;
-      const clipDurations = getClipDurations(
-        panel.clipMode,
-        audioDuration,
-        selectedClips,
-        sentencesLength
-      );
-
-      setScripts((prev) => ({
-        ...prev,
-        [videoId]: {
-          ...prev[videoId],
-          mergeStatus: "Склеиваем видео, это займёт 1-2 минуты...",
-        },
-      }));
+      const clipUrls = selectedClips.map((clip) => clip.url);
+      const startTimes = selectedClips.map(() => 0);
+      const durations = selectedClips.map((clip) => clip.duration);
 
       const formData = new FormData();
       formData.append("audio", audioBlob, "audio.mp3");
+      clipUrls.forEach((url) => formData.append("clip_urls", url));
+      startTimes.forEach((t) => formData.append("start_times", String(t)));
+      durations.forEach((d) => formData.append("durations", String(d)));
       formData.append("audio_duration", String(audioDuration));
-      clipBlobs.forEach((clipBlob, index) => {
-        formData.append("clips", clipBlob, `clip_${index}.mp4`);
-      });
-      clipDurations.forEach((duration) => {
-        formData.append("durations", String(duration));
-      });
 
       const mergeController = new AbortController();
-      const mergeTimeoutId = setTimeout(() => mergeController.abort(), 120_000);
+      const mergeTimeoutId = setTimeout(() => mergeController.abort(), 600_000);
 
       let mergeRes: Response;
       try {
-        // Напрямую на Railway из браузера — без Vercel API (долгий ответ)
         mergeRes = await fetch(RAILWAY_MERGE_URL, {
           method: "POST",
           body: formData,
@@ -896,7 +844,12 @@ export default function Home() {
         throw new Error(errorMessage);
       }
 
-      const resultBlob = await mergeRes.blob();
+      const { url } = (await mergeRes.json()) as { url: string };
+      const videoRes = await fetch(url);
+      if (!videoRes.ok) {
+        throw new Error("Не удалось скачать готовое видео");
+      }
+      const resultBlob = await videoRes.blob();
 
       setScripts((prev) => ({
         ...prev,
@@ -922,7 +875,7 @@ export default function Home() {
     } catch (err) {
       const message =
         err instanceof Error && err.name === "AbortError"
-          ? "Превышено время ожидания склейки (2 мин)"
+          ? "Превышено время ожидания склейки (10 мин)"
           : err instanceof Error
             ? err.message
             : "Ошибка создания видео";

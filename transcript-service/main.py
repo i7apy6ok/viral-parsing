@@ -1,16 +1,16 @@
 import glob
 import os
 import re
-import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
+import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from starlette.background import BackgroundTask
 
 app = FastAPI(title="Transcript Service")
 
@@ -127,82 +127,90 @@ def upload_suffix(upload: UploadFile, default: str) -> str:
 @app.post("/merge")
 async def merge_video(
     audio: UploadFile = File(...),
-    clips: list[UploadFile] = File(...),
+    clip_urls: list[str] = Form(...),
+    start_times: list[float] = Form(...),
     durations: list[float] = Form(...),
     audio_duration: float = Form(...),
 ):
-    if not clips:
-        raise HTTPException(status_code=400, detail="At least one clip is required")
+    if not clip_urls:
+        raise HTTPException(status_code=400, detail="At least one clip URL is required")
 
-    try:
-        with tempfile.TemporaryDirectory(prefix="merge_") as tmpdir:
-            tmpdir = Path(tmpdir)
-
-            audio_path = tmpdir / f"audio{upload_suffix(audio, '.mp3')}"
-            await save_upload(audio, audio_path)
-
-            clip_paths: list[Path] = []
-            for i, clip in enumerate(clips):
-                clip_path = tmpdir / f"clip_{i}{upload_suffix(clip, '.mp4')}"
-                await save_upload(clip, clip_path)
-
-                if clip_path.stat().st_size < 1000:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Clip {i} is too small or empty",
-                    )
-
-                duration = durations[i] if i < len(durations) else 10
-                normalized_path = tmpdir / f"clip_{i}_norm.mp4"
-                subprocess.run([
-                    "ffmpeg", "-i", str(clip_path),
-                    "-t", str(duration),
-                    "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:-1:-1:color=black",
-                    "-r", "25",
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32",
-                    "-threads", "1",
-                    "-c:a", "aac", "-ar", "44100", "-ac", "2",
-                    "-y", str(normalized_path),
-                ], check=True, capture_output=True)
-                clip_paths.append(normalized_path)
-
-            list_file = tmpdir / "clips.txt"
-            with open(list_file, "w", encoding="utf-8") as f:
-                for clip_path in clip_paths:
-                    f.write(f"file '{clip_path.as_posix()}'\n")
-
-            merged_video = tmpdir / "merged.mp4"
-            subprocess.run([
-                "ffmpeg", "-f", "concat", "-safe", "0",
-                "-i", str(list_file),
-                "-c", "copy",
-                "-y", str(merged_video),
-            ], check=True, capture_output=True)
-
-            output_path = tmpdir / "output.mp4"
-            subprocess.run([
-                "ffmpeg", "-i", str(merged_video), "-i", str(audio_path),
-                "-c:v", "copy", "-c:a", "aac",
-                "-map", "0:v:0", "-map", "1:a:0",
-                "-t", str(audio_duration),
-                "-y", str(output_path),
-            ], check=True, capture_output=True)
-
-            persist_dir = Path(tempfile.mkdtemp(prefix="merge_out_"))
-            persist_path = persist_dir / "result.mp4"
-            shutil.copy2(output_path, persist_path)
-
-            return FileResponse(
-                str(persist_path),
-                media_type="video/mp4",
-                filename="result.mp4",
-                background=BackgroundTask(shutil.rmtree, persist_dir, ignore_errors=True),
-            )
-    except subprocess.CalledProcessError as e:
+    if len(clip_urls) != len(start_times) or len(clip_urls) != len(durations):
         raise HTTPException(
-            status_code=500,
-            detail=f"ffmpeg error: {e.stderr.decode() if e.stderr else str(e)}",
+            status_code=400,
+            detail="clip_urls, start_times, and durations must have the same length",
         )
+
+    rendi_api_key = os.environ.get("RENDI_API_KEY")
+    if not rendi_api_key:
+        raise HTTPException(status_code=500, detail="RENDI_API_KEY not configured")
+
+    with tempfile.TemporaryDirectory(prefix="merge_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        audio_path = tmpdir / f"audio{upload_suffix(audio, '.mp3')}"
+        await save_upload(audio, audio_path)
+
+        with open(audio_path, "rb") as audio_file:
+            audio_upload = requests.post(
+                "https://api.rendi.dev/v1/files",
+                headers={"X-API-KEY": rendi_api_key},
+                files={"file": (audio_path.name, audio_file, "audio/mpeg")},
+                timeout=60,
+            )
+        audio_upload.raise_for_status()
+        audio_rendi_url = audio_upload.json()["url"]
+
+    command: list[str] = []
+    for url, start, duration in zip(clip_urls, start_times, durations):
+        command.extend(["-ss", str(start), "-t", str(duration), "-i", url])
+    command.extend(["-i", audio_rendi_url])
+
+    n = len(clip_urls)
+    filter_complex = ""
+    for i in range(n):
+        filter_complex += (
+            f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"pad=1080:1920:-1:-1:color=black,fps=30,setsar=1[v{i}];"
+        )
+    filter_complex += "".join(f"[v{i}]" for i in range(n))
+    filter_complex += f"concat=n={n}:v=1:a=0[vout]"
+
+    command.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[vout]",
+        "-map", f"{n}:a:0",
+        "-t", str(audio_duration),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "aac", "-ar", "44100",
+        "-movflags", "+faststart",
+        "output.mp4",
+    ])
+
+    job_response = requests.post(
+        "https://api.rendi.dev/v1/run-ffmpeg-command",
+        headers={"X-API-KEY": rendi_api_key},
+        json={"ffmpeg_command": command},
+        timeout=30,
+    )
+    job_response.raise_for_status()
+    job_id = job_response.json()["id"]
+
+    for _ in range(120):
+        time.sleep(5)
+        poll = requests.get(
+            f"https://api.rendi.dev/v1/commands/{job_id}",
+            headers={"X-API-KEY": rendi_api_key},
+            timeout=30,
+        )
+        poll.raise_for_status()
+        data = poll.json()
+        if data["status"] == "COMPLETED":
+            output_url = data["outputs"]["output.mp4"]
+            return JSONResponse({"url": output_url})
+        if data["status"] == "FAILED":
+            raise HTTPException(status_code=500, detail=f"Rendi error: {data}")
+
+    raise HTTPException(status_code=504, detail="Rendi timeout after 10 minutes")
 
 
 if __name__ == "__main__":
