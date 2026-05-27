@@ -118,22 +118,28 @@ def transcript(body: TranscriptRequest):
 
 
 def upload_audio_to_supabase_sync(file_path: Path) -> str:
-    supabase = get_supabase()
-    filename = file_path.name
-    file_bytes = file_path.read_bytes()
+    try:
+        supabase = get_supabase()
+        filename = file_path.name
+        file_bytes = file_path.read_bytes()
 
-    supabase.storage.from_(AUDIO_TEMP_BUCKET).upload(
-        path=filename,
-        file=file_bytes,
-        file_options={"content-type": "audio/mpeg", "upsert": "true"},
-    )
+        supabase.storage.from_(AUDIO_TEMP_BUCKET).upload(
+            path=filename,
+            file=file_bytes,
+            file_options={"content-type": "audio/mpeg", "upsert": "true"},
+        )
 
-    public_url = supabase.storage.from_(AUDIO_TEMP_BUCKET).get_public_url(filename)
-    if isinstance(public_url, dict):
-        url = public_url.get("publicUrl") or public_url.get("publicURL")
-        if url:
-            return str(url).strip()
-    return str(public_url).strip()
+        public_url = supabase.storage.from_(AUDIO_TEMP_BUCKET).get_public_url(filename)
+        if isinstance(public_url, dict):
+            url = public_url.get("publicUrl") or public_url.get("publicURL")
+            if url:
+                return str(url).strip()
+        return str(public_url).strip()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.warning(f"Supabase upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Supabase upload failed: {e}") from e
 
 
 def remove_audio_from_supabase_sync(filename: str) -> None:
@@ -313,9 +319,17 @@ async def merge_video(
 
     try:
         await save_upload(audio, audio_path)
-        audio_public_url = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: upload_audio_to_supabase_sync(audio_path)
-        )
+        try:
+            audio_public_url = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: upload_audio_to_supabase_sync(audio_path)
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.warning(f"Supabase upload executor error: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Supabase upload failed: {e}"
+            ) from e
 
         output_url = merge_with_rendi(
             RENDI_API_KEY,
@@ -334,6 +348,11 @@ async def merge_video(
             logging.warning(f"Supabase audio cleanup failed: {cleanup_err}")
 
         return JSONResponse({"url": output_url})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.warning(f"Merge failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Merge failed: {e}") from e
     finally:
         audio_path.unlink(missing_ok=True)
 

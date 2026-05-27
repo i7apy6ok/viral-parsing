@@ -3,4 +3,4 @@ uvicorn[standard]
 yt-dlp
 python-multipart
 requests
-supabase
+supabase==2.10.0
