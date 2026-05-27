@@ -18,6 +18,24 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(title="Transcript Service")
 
+AUDIO_TEMP_BUCKET = "audio-temp"
+_supabase_client: Client | None = None
+
+
+def get_supabase() -> Client:
+    global _supabase_client
+    if _supabase_client is None:
+        supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+        supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
+        if not supabase_url or not supabase_key:
+            raise HTTPException(
+                status_code=500,
+                detail="SUPABASE_URL and SUPABASE_KEY must be configured",
+            )
+        _supabase_client = create_client(supabase_url, supabase_key)
+    return _supabase_client
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
