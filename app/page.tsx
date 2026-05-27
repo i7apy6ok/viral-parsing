@@ -247,9 +247,6 @@ function estimateSegmentDurations(
     return [];
   }
 
-  const isRussian = /[а-яё]/i.test(texts.join(""));
-  const charsPerSec = isRussian ? 15 : 13;
-
   const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
   const totalChars = charCounts.reduce((a, b) => a + b, 0);
   if (totalChars === 0) {
