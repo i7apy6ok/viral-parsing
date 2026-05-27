@@ -312,6 +312,16 @@ async def merge_video(
     durations: list[float] = Form(...),
     audio_duration: float = Form(...),
 ):
+    logging.warning(
+        "/merge incoming: "
+        f"clip_urls={clip_urls!r} "
+        f"start_times={start_times!r} "
+        f"durations={durations!r} "
+        f"audio_duration={audio_duration!r} "
+        f"audio_filename={audio.filename!r} "
+        f"audio_content_type={audio.content_type!r}"
+    )
+
     if not clip_urls:
         raise HTTPException(status_code=400, detail="At least one clip URL is required")
 

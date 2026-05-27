@@ -30,6 +30,7 @@ type ScriptPanelState = {
   voiceError: string | null;
   voiceAudioUrl: string | null;
   voiceAudioBlob: Blob | null;
+  audioDuration: number | null;
   footageLoading: boolean;
   footageError: string | null;
   footageGroups: FootageGroup[];
@@ -238,6 +239,48 @@ function getFootageQueries(script: ScriptResult, clipMode: ClipMode): string[] {
     .filter(Boolean);
 }
 
+function estimateSegmentDurations(
+  texts: string[],
+  totalAudioDuration: number
+): number[] {
+  if (texts.length === 0) {
+    return [];
+  }
+
+  const isRussian = /[а-яё]/i.test(texts.join(""));
+  const charsPerSec = isRussian ? 15 : 13;
+
+  const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
+  const totalChars = charCounts.reduce((a, b) => a + b, 0);
+  if (totalChars === 0) {
+    return texts.map(() => 0);
+  }
+
+  return charCounts.map(
+    (c) => Math.round((c / totalChars) * totalAudioDuration * 10) / 10
+  );
+}
+
+function FootageDurationLabel({
+  pexelsDuration,
+  estimatedDuration,
+}: {
+  pexelsDuration: number;
+  estimatedDuration: number | null;
+}) {
+  if (estimatedDuration == null) {
+    return <p className="text-xs text-zinc-500">{pexelsDuration} сек</p>;
+  }
+
+  return (
+    <p className="text-xs">
+      <span className="text-zinc-500">{pexelsDuration} сек</span>
+      <span className="text-zinc-500"> → </span>
+      <span className="text-green-400">{estimatedDuration} сек</span>
+    </p>
+  );
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -410,6 +453,7 @@ export default function Home() {
         voiceError: null,
         voiceAudioUrl: null,
         voiceAudioBlob: null,
+        audioDuration: null,
         ...FOOTAGE_DEFAULTS,
       },
     }));
@@ -447,6 +491,7 @@ export default function Home() {
           voiceError: null,
           voiceAudioUrl: null,
           voiceAudioBlob: null,
+          audioDuration: null,
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -465,6 +510,7 @@ export default function Home() {
           voiceError: null,
           voiceAudioUrl: null,
           voiceAudioBlob: null,
+          audioDuration: null,
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -675,6 +721,7 @@ export default function Home() {
         voiceError: null,
         voiceAudioUrl: null,
         voiceAudioBlob: null,
+        audioDuration: null,
         ...FOOTAGE_DEFAULTS,
       },
     }));
@@ -704,6 +751,13 @@ export default function Home() {
       const blob = await res.blob();
       const audioUrl = URL.createObjectURL(blob);
 
+      const audioContext = new AudioContext();
+      const audioBuffer = await audioContext.decodeAudioData(
+        await blob.arrayBuffer()
+      );
+      const audioDuration = audioBuffer.duration;
+      await audioContext.close();
+
       setScripts((prev) => ({
         ...prev,
         [videoId]: {
@@ -712,6 +766,7 @@ export default function Home() {
           voiceError: null,
           voiceAudioUrl: audioUrl,
           voiceAudioBlob: blob,
+          audioDuration,
         },
       }));
 
@@ -729,6 +784,7 @@ export default function Home() {
             err instanceof Error ? err.message : "Ошибка озвучки",
           voiceAudioUrl: null,
           voiceAudioBlob: null,
+          audioDuration: null,
         },
       }));
     }
@@ -797,16 +853,23 @@ export default function Home() {
         throw new Error("Не удалось скачать аудио");
       }
 
-      const audioContext = new AudioContext();
-      const audioBuffer = await audioContext.decodeAudioData(
-        await audioBlob.arrayBuffer()
-      );
-      const audioDuration = audioBuffer.duration;
-      await audioContext.close();
+      let audioDuration = panel.audioDuration;
+      if (audioDuration == null) {
+        const audioContext = new AudioContext();
+        const audioBuffer = await audioContext.decodeAudioData(
+          await audioBlob.arrayBuffer()
+        );
+        audioDuration = audioBuffer.duration;
+        await audioContext.close();
+      }
+
+      const footageTexts = panel.footageGroups
+        .filter((group) => !group.loading && group.videos.length > 0)
+        .map((group) => group.query);
+      const durations = estimateSegmentDurations(footageTexts, audioDuration);
 
       const clipUrls = selectedClips.map((clip) => clip.url);
       const startTimes = selectedClips.map(() => 0);
-      const durations = selectedClips.map((clip) => clip.duration);
 
       const formData = new FormData();
       formData.append("audio", audioBlob, "audio.mp3");
@@ -1076,6 +1139,15 @@ export default function Home() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {videos.slice(0, visibleCount).map((video) => {
               const panel = scripts[video.videoId];
+              const segmentDurations =
+                panel &&
+                panel.audioDuration != null &&
+                panel.footageGroups.length > 0
+                  ? estimateSegmentDurations(
+                      panel.footageGroups.map((g) => g.query),
+                      panel.audioDuration
+                    )
+                  : null;
               return (
               <article
                 key={video.videoId}
@@ -1332,9 +1404,12 @@ export default function Home() {
                                           videoUrl={activeVideo.url}
                                           poster={activeVideo.preview}
                                         />
-                                        <p className="text-xs text-zinc-500">
-                                          {activeVideo.duration} сек
-                                        </p>
+                                        <FootageDurationLabel
+                                          pexelsDuration={activeVideo.duration}
+                                          estimatedDuration={
+                                            segmentDurations?.[queryIndex] ?? null
+                                          }
+                                        />
                                         {group.videos.length > 1 && (
                                           <button
                                             type="button"
@@ -1351,21 +1426,29 @@ export default function Home() {
                                         )}
                                       </div>
                                     ) : (
-                                      <img
-                                        src={activeVideo.preview}
-                                        alt=""
-                                        loading="lazy"
-                                        onClick={() =>
-                                          setScripts((prev) => ({
-                                            ...prev,
-                                            [video.videoId]: {
-                                              ...prev[video.videoId],
-                                              openFootageIndex: queryIndex,
-                                            },
-                                          }))
-                                        }
-                                        className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-zinc-700 object-cover opacity-60 transition-opacity hover:opacity-100"
-                                      />
+                                      <div className="space-y-2">
+                                        <img
+                                          src={activeVideo.preview}
+                                          alt=""
+                                          loading="lazy"
+                                          onClick={() =>
+                                            setScripts((prev) => ({
+                                              ...prev,
+                                              [video.videoId]: {
+                                                ...prev[video.videoId],
+                                                openFootageIndex: queryIndex,
+                                              },
+                                            }))
+                                          }
+                                          className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-zinc-700 object-cover opacity-60 transition-opacity hover:opacity-100"
+                                        />
+                                        <FootageDurationLabel
+                                          pexelsDuration={activeVideo.duration}
+                                          estimatedDuration={
+                                            segmentDurations?.[queryIndex] ?? null
+                                          }
+                                        />
+                                      </div>
                                     )}
                                   </div>
                                   );
