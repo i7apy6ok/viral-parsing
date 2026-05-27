@@ -201,7 +201,7 @@ def rendi_output_url(data: dict) -> str:
 
 
 def merge_with_rendi(
-    rendi_api_key: str,
+    RENDI_API_KEY: str,
     clip_urls: list[str],
     start_times: list[float],
     durations: list[float],
@@ -216,13 +216,18 @@ def merge_with_rendi(
         audio_duration,
     )
 
+    headers = {"X-API-KEY": RENDI_API_KEY}
     logging.warning(
-        f"Sending to Rendi with key: {rendi_api_key[:10] if rendi_api_key else 'NONE'}..."
+        f"Headers being sent: X-API-KEY length={len(RENDI_API_KEY) if RENDI_API_KEY else 0}"
+    )
+    logging.warning(
+        f"Key first 10: '{RENDI_API_KEY[:10] if RENDI_API_KEY else None}' "
+        f"last 5: '{RENDI_API_KEY[-5:] if RENDI_API_KEY else None}'"
     )
 
     job_response = requests.post(
         "https://api.rendi.dev/v1/run-ffmpeg-command",
-        headers={"X-API-KEY": rendi_api_key},
+        headers=headers,
         json={
             "input_files": input_files,
             "output_files": output_files,
@@ -250,7 +255,7 @@ def merge_with_rendi(
         time.sleep(5)
         poll = requests.get(
             f"https://api.rendi.dev/v1/commands/{command_id}",
-            headers={"X-API-KEY": rendi_api_key},
+            headers=headers,
             timeout=30,
         )
         poll.raise_for_status()
@@ -281,7 +286,7 @@ async def merge_video(
             detail="clip_urls, start_times, and durations must have the same length",
         )
 
-    RENDI_API_KEY = os.environ.get("RENDI_API_KEY")
+    RENDI_API_KEY = os.environ.get("RENDI_API_KEY", "").strip()
     logging.warning(
         f"RENDI_API_KEY loaded: {'YES' if RENDI_API_KEY else 'NO - KEY IS MISSING'}"
     )
