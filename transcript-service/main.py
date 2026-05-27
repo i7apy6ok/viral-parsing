@@ -291,7 +291,14 @@ async def merge_video(
                 files={"file": (audio_path.name, f, "audio/mpeg")},
                 timeout=60,
             )
-        upload_response.raise_for_status()
+        try:
+            upload_response.raise_for_status()
+        except Exception as e:
+            logging.warning(
+                f"Rendi storage upload error: {upload_response.status_code} - {upload_response.text}"
+            )
+            raise
+
         audio_rendi_url = upload_response.json()["url"]
 
     output_url = merge_with_rendi(
