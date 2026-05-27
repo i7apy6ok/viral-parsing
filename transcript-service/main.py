@@ -16,8 +16,6 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(title="Transcript Service")
 
-TEMP_FILES: dict[str, Path] = {}
-RENDI_AUDIO_DIR = Path("/tmp/rendi_audio")
 RAILWAY_PUBLIC_BASE = os.environ.get(
     "PUBLIC_BASE_URL",
     "https://viral-parsing-production.up.railway.app",
@@ -124,10 +122,10 @@ def transcript(body: TranscriptRequest):
 
 @app.get("/files/{filename}")
 async def serve_file(filename: str):
-    path = TEMP_FILES.get(filename)
-    if not path or not path.exists():
+    path = Path(f"/tmp/rendi_audio/{filename}")
+    if not path.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(path))
+    return FileResponse(str(path), media_type="audio/mpeg")
 
 
 async def save_upload(upload: UploadFile, path: Path) -> None:
@@ -293,14 +291,14 @@ async def merge_video(
     if not RENDI_API_KEY:
         raise HTTPException(status_code=500, detail="RENDI_API_KEY not configured")
 
-    RENDI_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     file_id = str(uuid.uuid4())
-    audio_path = RENDI_AUDIO_DIR / f"{file_id}{upload_suffix(audio, '.mp3')}"
+    audio_filename = f"{file_id}.mp3"
+    audio_path = Path(f"/tmp/rendi_audio/{audio_filename}")
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         await save_upload(audio, audio_path)
-        TEMP_FILES[file_id] = audio_path
-        audio_public_url = f"{RAILWAY_PUBLIC_BASE}/files/{file_id}"
+        audio_public_url = f"{RAILWAY_PUBLIC_BASE}/files/{audio_filename}"
 
         output_url = merge_with_rendi(
             RENDI_API_KEY,
@@ -312,7 +310,6 @@ async def merge_video(
         )
         return JSONResponse({"url": output_url})
     finally:
-        TEMP_FILES.pop(file_id, None)
         audio_path.unlink(missing_ok=True)
 
 
