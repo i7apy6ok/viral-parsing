@@ -1,3 +1,4 @@
+import asyncio
 import glob
 import logging
 import os
@@ -11,15 +12,10 @@ from pathlib import Path
 import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Transcript Service")
-
-RAILWAY_PUBLIC_BASE = os.environ.get(
-    "PUBLIC_BASE_URL",
-    "https://viral-parsing-production.up.railway.app",
-)
 
 app.add_middleware(
     CORSMiddleware,
@@ -120,12 +116,15 @@ def transcript(body: TranscriptRequest):
     return {"transcript": transcript_text}
 
 
-@app.get("/files/{filename}")
-async def serve_file(filename: str):
-    path = Path(f"/tmp/rendi_audio/{filename}")
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(path), media_type="audio/mpeg")
+def upload_to_0x0_sync(file_path: Path) -> str:
+    with open(file_path, "rb") as f:
+        response = requests.post(
+            "https://0x0.st",
+            files={"file": (file_path.name, f, "audio/mpeg")},
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.text.strip()
 
 
 async def save_upload(upload: UploadFile, path: Path) -> None:
@@ -298,7 +297,9 @@ async def merge_video(
 
     try:
         await save_upload(audio, audio_path)
-        audio_public_url = f"{RAILWAY_PUBLIC_BASE}/files/{audio_filename}"
+        audio_public_url = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: upload_to_0x0_sync(audio_path)
+        )
 
         output_url = merge_with_rendi(
             RENDI_API_KEY,
