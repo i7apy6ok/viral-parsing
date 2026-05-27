@@ -1,4 +1,5 @@
 import glob
+import logging
 import os
 import re
 import subprocess
@@ -201,6 +202,10 @@ def merge_with_rendi(
         audio_duration,
     )
 
+    logging.warning(
+        f"Sending to Rendi with key: {rendi_api_key[:10] if rendi_api_key else 'NONE'}..."
+    )
+
     job_response = requests.post(
         "https://api.rendi.dev/v1/run-ffmpeg-command",
         headers={"X-API-KEY": rendi_api_key},
@@ -248,8 +253,11 @@ async def merge_video(
             detail="clip_urls, start_times, and durations must have the same length",
         )
 
-    rendi_api_key = os.environ.get("RENDI_API_KEY")
-    if not rendi_api_key:
+    RENDI_API_KEY = os.environ.get("RENDI_API_KEY")
+    logging.warning(
+        f"RENDI_API_KEY loaded: {'YES' if RENDI_API_KEY else 'NO - KEY IS MISSING'}"
+    )
+    if not RENDI_API_KEY:
         raise HTTPException(status_code=500, detail="RENDI_API_KEY not configured")
 
     MERGE_FILES_DIR.mkdir(parents=True, exist_ok=True)
@@ -262,7 +270,7 @@ async def merge_video(
         audio_public_url = f"{RAILWAY_PUBLIC_BASE}/files/{file_id}"
 
         output_url = merge_with_rendi(
-            rendi_api_key,
+            RENDI_API_KEY,
             clip_urls,
             start_times,
             durations,
