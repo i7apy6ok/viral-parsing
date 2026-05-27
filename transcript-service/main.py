@@ -216,7 +216,14 @@ def merge_with_rendi(
         },
         timeout=30,
     )
-    job_response.raise_for_status()
+    try:
+        job_response.raise_for_status()
+    except Exception as e:
+        logging.warning(
+            f"Rendi error response: {job_response.status_code} - {job_response.text}"
+        )
+        raise
+
     job_id = job_response.json()["id"]
 
     for _ in range(120):
