@@ -5,23 +5,15 @@ import re
 import subprocess
 import tempfile
 import time
-import uuid
 from pathlib import Path
 
 import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Transcript Service")
-
-TEMP_FILES: dict[str, Path] = {}
-RAILWAY_PUBLIC_BASE = os.environ.get(
-    "PUBLIC_BASE_URL",
-    "https://viral-parsing-production.up.railway.app",
-)
-MERGE_FILES_DIR = Path(tempfile.gettempdir()) / "viral_merge_files"
 
 app.add_middleware(
     CORSMiddleware,
@@ -120,14 +112,6 @@ def transcript(body: TranscriptRequest):
         )
 
     return {"transcript": transcript_text}
-
-
-@app.get("/files/{filename}")
-async def serve_file(filename: str):
-    path = TEMP_FILES.get(filename)
-    if not path or not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(path))
 
 
 async def save_upload(upload: UploadFile, path: Path) -> None:
@@ -293,27 +277,32 @@ async def merge_video(
     if not RENDI_API_KEY:
         raise HTTPException(status_code=500, detail="RENDI_API_KEY not configured")
 
-    MERGE_FILES_DIR.mkdir(parents=True, exist_ok=True)
-    file_id = str(uuid.uuid4())
-    audio_path = MERGE_FILES_DIR / f"{file_id}{upload_suffix(audio, '.mp3')}"
+    rendi_headers = {"X-API-KEY": RENDI_API_KEY}
 
-    try:
+    with tempfile.TemporaryDirectory(prefix="merge_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        audio_path = tmpdir / f"audio{upload_suffix(audio, '.mp3')}"
         await save_upload(audio, audio_path)
-        TEMP_FILES[file_id] = audio_path
-        audio_public_url = f"{RAILWAY_PUBLIC_BASE}/files/{file_id}"
 
-        output_url = merge_with_rendi(
-            RENDI_API_KEY,
-            clip_urls,
-            start_times,
-            durations,
-            audio_public_url,
-            audio_duration,
-        )
-        return JSONResponse({"url": output_url})
-    finally:
-        TEMP_FILES.pop(file_id, None)
-        audio_path.unlink(missing_ok=True)
+        with open(audio_path, "rb") as f:
+            upload_response = requests.post(
+                "https://api.rendi.dev/v1/storage/upload",
+                headers=rendi_headers,
+                files={"file": (audio_path.name, f, "audio/mpeg")},
+                timeout=60,
+            )
+        upload_response.raise_for_status()
+        audio_rendi_url = upload_response.json()["url"]
+
+    output_url = merge_with_rendi(
+        RENDI_API_KEY,
+        clip_urls,
+        start_times,
+        durations,
+        audio_rendi_url,
+        audio_duration,
+    )
+    return JSONResponse({"url": output_url})
 
 
 if __name__ == "__main__":
