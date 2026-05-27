@@ -158,6 +158,24 @@ function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed">
   };
 }
 
+type ClaudeApiError = Error & {
+  response?: { data?: unknown };
+};
+
+function claudeErrorMessage(status: number, data: unknown): string {
+  if (data && typeof data === "object" && data !== null) {
+    const apiError = (data as { error?: { message?: string; type?: string } })
+      .error;
+    if (typeof apiError?.message === "string") {
+      const typeSuffix =
+        typeof apiError.type === "string" ? ` (${apiError.type})` : "";
+      return `Claude API ${status}: ${apiError.message}${typeSuffix}`;
+    }
+    return `Claude API ${status}: ${JSON.stringify(data)}`;
+  }
+  return `Claude API ${status}: ${String(data)}`;
+}
+
 async function generateWithClaude(
   prompt: string
 ): Promise<Omit<ScriptResult, "transcriptUsed">> {
@@ -169,37 +187,49 @@ async function generateWithClaude(
   const baseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
   const url = `${baseUrl}/v1/messages`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 2500,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 2500,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
 
-  const data = await res.json();
+    const data = await res.json();
 
-  if (!res.ok) {
-    const message =
-      typeof data?.error?.message === "string"
-        ? data.error.message
-        : "Claude API request failed";
-    console.error("Claude API error:", data);
-    throw new Error(message);
+    if (!res.ok) {
+      const err = new Error(claudeErrorMessage(res.status, data)) as ClaudeApiError;
+      err.response = { data };
+      throw err;
+    }
+
+    const content = data.content?.[0]?.text;
+    if (typeof content !== "string") {
+      throw new Error(
+        `Empty response from Claude: ${JSON.stringify(data)}`
+      );
+    }
+
+    return parseScriptResponse(content);
+  } catch (error: unknown) {
+    const err = error as ClaudeApiError;
+    console.error(
+      "Claude API error:",
+      err?.message,
+      JSON.stringify(err?.response?.data || error)
+    );
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(String(error));
   }
-
-  const content = data.content?.[0]?.text;
-  if (typeof content !== "string") {
-    throw new Error("Empty response from Claude");
-  }
-
-  return parseScriptResponse(content);
 }
 
 export async function POST(request: Request) {
@@ -238,10 +268,15 @@ export async function POST(request: Request) {
       ...script,
       transcriptUsed,
     });
-  } catch (error) {
+  } catch (error: unknown) {
+    const err = error as ClaudeApiError;
+    console.error(
+      "Claude API error:",
+      err?.message,
+      JSON.stringify(err?.response?.data || error)
+    );
     const message =
       error instanceof Error ? error.message : "Internal server error";
-    console.error("generate-script error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
