@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 type SearchVideosBody = {
   queries?: string[];
+  pages?: number[];
 };
 
 type PexelsVideoFile = {
@@ -53,12 +54,14 @@ function pickHdMp4Url(videoFiles: PexelsVideoFile[]): string | null {
 
 async function searchPexelsVideos(
   query: string,
-  apiKey: string
+  apiKey: string,
+  page = 1
 ): Promise<SearchVideoResult[]> {
   const params = new URLSearchParams({
     query,
     per_page: "3",
     orientation: "portrait",
+    page: String(Math.max(1, Math.min(50, Math.floor(page)))),
   });
 
   const res = await fetch(`${PEXELS_SEARCH_URL}?${params}`, {
@@ -116,8 +119,11 @@ export async function POST(request: Request) {
       );
     }
 
+    const pages = body.pages ?? [];
     const results = await Promise.all(
-      queries.map((query) => searchPexelsVideos(query, apiKey))
+      queries.map((query, index) =>
+        searchPexelsVideos(query, apiKey, pages[index] ?? 1)
+      )
     );
 
     return NextResponse.json(results.flat());

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ScriptResult } from "./api/generate-script/route";
 import type { SearchVideoResult } from "./api/search-videos/route";
 import type {
@@ -24,12 +24,15 @@ type ManualSlot = {
   loading: boolean;
   selectedIndex: number;
   customDuration: number | null;
+  lastSearchQuery: string;
+  searchPage: number;
 };
 
 type ManualGroup = {
   originalText: string;
   translation: string;
   slots: ManualSlot[];
+  slotDurations: [number, number, number] | null;
 };
 
 type ClipMode = "sentences" | "manual";
@@ -218,12 +221,13 @@ function toggleLanguage(
 }
 
 async function searchFootageVideos(
-  queries: string[]
+  queries: string[],
+  pages?: number[]
 ): Promise<SearchVideoResult[]> {
   const res = await fetch("/api/search-videos", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ queries }),
+    body: JSON.stringify({ queries, pages }),
   });
 
   const data = await res.json();
@@ -256,49 +260,30 @@ function splitTextWithTranslation(text: string): {
   };
 }
 
-function ScriptTextWithTranslation({
-  text,
-  className,
-}: {
-  text: string;
-  className?: string;
-}) {
-  const { main, translation } = splitTextWithTranslation(text);
+function renderWithTranslation(text: string): ReactNode {
+  const regex = /\(([^)]+)\)/g;
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
 
-  return (
-    <span className={className}>
-      {main}
-      {translation && (
-        <>
-          {" "}
-          <span style={TRANSLATION_STYLE}>({translation})</span>
-        </>
-      )}
-    </span>
-  );
-}
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    parts.push(
+      <span key={key++} style={TRANSLATION_STYLE}>
+        ({match[1]})
+      </span>
+    );
+    lastIndex = regex.lastIndex;
+  }
 
-function ScriptHookText({
-  hook,
-  language,
-}: {
-  hook: string;
-  language: ScriptLanguage;
-}) {
-  const { main, translation } = splitTextWithTranslation(hook);
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
 
-  return (
-    <>
-      <p className="mt-1 leading-snug text-zinc-200">
-        {language === "ru" ? hook : main}
-      </p>
-      {language !== "ru" && translation && (
-        <p className="mt-0.5 text-xs leading-snug" style={TRANSLATION_STYLE}>
-          {translation}
-        </p>
-      )}
-    </>
-  );
+  return parts.length > 0 ? parts : text;
 }
 
 function toPexelsSearchQuery(query: string): string {
@@ -362,6 +347,55 @@ function getFootageQueries(
   return hook ? [hook, ...rest] : rest;
 }
 
+function splitWithVariance(total: number): [number, number, number] {
+  const base = total / 3;
+  const v = base * 0.2;
+  const a = base + (Math.random() * 2 - 1) * v;
+  const b = base + (Math.random() * 2 - 1) * v;
+  const c = total - a - b;
+  return [
+    Math.max(0.1, Math.round(a * 10) / 10),
+    Math.max(0.1, Math.round(b * 10) / 10),
+    Math.max(0.1, Math.round(c * 10) / 10),
+  ];
+}
+
+function getManualSegmentDuration(
+  groups: ManualGroup[],
+  groupIndex: number,
+  audioDuration: number,
+  language: ScriptLanguage
+): number {
+  const charCounts = groups.map((group) =>
+    segmentTextForDuration(group.originalText, language).replace(/\s+/g, "")
+      .length
+  );
+  const totalChars = charCounts.reduce((sum, count) => sum + count, 0);
+  if (totalChars === 0) {
+    return 0;
+  }
+  return (charCounts[groupIndex] / totalChars) * audioDuration;
+}
+
+function applyManualSlotDurations(
+  groups: ManualGroup[],
+  audioDuration: number | null,
+  language: ScriptLanguage
+): ManualGroup[] {
+  if (audioDuration == null) {
+    return groups;
+  }
+
+  return groups.map((group, groupIndex) => ({
+    ...group,
+    slotDurations:
+      group.slotDurations ??
+      splitWithVariance(
+        getManualSegmentDuration(groups, groupIndex, audioDuration, language)
+      ),
+  }));
+}
+
 function createManualSlot(initialQuery: string): ManualSlot {
   return {
     query: initialQuery,
@@ -369,6 +403,8 @@ function createManualSlot(initialQuery: string): ManualSlot {
     loading: false,
     selectedIndex: 0,
     customDuration: null,
+    lastSearchQuery: "",
+    searchPage: 1,
   };
 }
 
@@ -395,6 +431,7 @@ function buildManualGroups(
       slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
         createManualSlot(initialQuery)
       ),
+      slotDurations: null,
     };
   });
 
@@ -412,6 +449,7 @@ function buildManualGroups(
     slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
       createManualSlot((script.videoQueries[0] ?? "").trim())
     ),
+    slotDurations: null,
   };
 
   return [hookGroup, ...sentenceGroups];
@@ -422,22 +460,19 @@ function getManualSlotCalculatedDurations(
   audioDuration: number,
   language: ScriptLanguage
 ): number[][] {
-  const charCounts = groups.map((group) =>
-    segmentTextForDuration(group.originalText, language).replace(/\s+/g, "")
-      .length
+  const withDurations = applyManualSlotDurations(
+    groups,
+    audioDuration,
+    language
   );
-  const totalChars = charCounts.reduce((sum, count) => sum + count, 0);
 
-  return groups.map((_, groupIndex) => {
-    const perSlot =
-      totalChars === 0
-        ? 0
-        : (charCounts[groupIndex] / totalChars) *
-          audioDuration /
-          MANUAL_SLOTS_PER_SENTENCE;
-
-    const rounded = Math.round(perSlot * 10) / 10;
-    return Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () => rounded);
+  return withDurations.map((group, groupIndex) => {
+    if (group.slotDurations) {
+      return [...group.slotDurations];
+    }
+    return splitWithVariance(
+      getManualSegmentDuration(withDurations, groupIndex, audioDuration, language)
+    );
   });
 }
 
@@ -512,12 +547,19 @@ function FootageQueryInput({
   disabled,
   onBlurCommit,
   onSearch,
+  enableEnterSearch = false,
 }: {
   disabled: boolean;
   onBlurCommit: (value: string) => void;
   onSearch: (value: string) => void;
+  enableEnterSearch?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const runSearch = () => {
+    const value = inputRef.current?.value.trim() ?? "";
+    onSearch(value);
+  };
 
   return (
     <div className="flex gap-2">
@@ -527,6 +569,16 @@ function FootageQueryInput({
         defaultValue=""
         disabled={disabled}
         onBlur={(e) => onBlurCommit(e.target.value.trim())}
+        onKeyDown={
+          enableEnterSearch
+            ? (e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  runSearch();
+                }
+              }
+            : undefined
+        }
         className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
         placeholder="Свой запрос в Стоки"
       />
@@ -534,16 +586,7 @@ function FootageQueryInput({
         type="button"
         title="Найти другое"
         disabled={disabled}
-        onClick={(e) => {
-          const sibling = e.currentTarget
-            .previousElementSibling as HTMLInputElement | null;
-          const value = (
-            inputRef.current?.value ??
-            sibling?.value ??
-            ""
-          ).trim();
-          onSearch(value);
-        }}
+        onClick={() => runSearch()}
         className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
       >
         🔄
@@ -632,6 +675,7 @@ function ManualFootageSlot({
         disabled={disabled}
         onBlurCommit={onBlurCommit}
         onSearch={onSearch}
+        enableEnterSearch
       />
 
       {slot.loading ? (
@@ -729,16 +773,12 @@ function ManualFootageSection({
         <div key={`${group.originalText}-${groupIndex}`} className="space-y-2">
           <div className="space-y-1">
             <p className="text-xs font-bold leading-snug text-zinc-100">
-              {group.originalText}
+              {renderWithTranslation(
+                group.translation
+                  ? `${group.originalText} (${group.translation})`
+                  : group.originalText
+              )}
             </p>
-            {language !== "ru" && group.translation && (
-              <p
-                className="text-xs leading-snug"
-                style={TRANSLATION_STYLE}
-              >
-                {group.translation}
-              </p>
-            )}
           </div>
 
           <div className="flex flex-row gap-2">
@@ -747,7 +787,9 @@ function ManualFootageSection({
                 key={`${groupIndex}-${slotIndex}`}
                 slot={slot}
                 calculatedDuration={
-                  manualCalculated?.[groupIndex]?.[slotIndex] ?? null
+                  group.slotDurations?.[slotIndex] ??
+                  manualCalculated?.[groupIndex]?.[slotIndex] ??
+                  null
                 }
                 disabled={slot.loading}
                 onBlurCommit={(value) =>
@@ -1205,7 +1247,11 @@ export default function Home() {
         ...prev,
         [videoId]: {
           ...prev[videoId],
-          manualGroups: groups,
+          manualGroups: applyManualSlotDurations(
+            groups,
+            prev[videoId]?.audioDuration ?? null,
+            language
+          ),
           footageLoading: false,
           footageError: null,
         },
@@ -1238,22 +1284,26 @@ export default function Home() {
           ...prev[videoId],
           footageLoading: false,
           footageError: null,
-          manualGroups: groups.map((group, groupIndex) => {
-            const searchQuery = searchQueries[groupIndex];
-            const videos = searchQuery
-              ? results.filter((video) => video.query === searchQuery)
-              : [];
+          manualGroups: applyManualSlotDurations(
+            groups.map((group, groupIndex) => {
+              const searchQuery = searchQueries[groupIndex];
+              const videos = searchQuery
+                ? results.filter((video) => video.query === searchQuery)
+                : [];
 
-            return {
-              ...group,
-              slots: group.slots.map((slot) => ({
-                ...slot,
-                videos,
-                loading: false,
-                selectedIndex: 0,
-              })),
-            };
-          }),
+              return {
+                ...group,
+                slots: group.slots.map((slot) => ({
+                  ...slot,
+                  videos,
+                  loading: false,
+                  selectedIndex: 0,
+                })),
+              };
+            }),
+            prev[videoId]?.audioDuration ?? null,
+            language
+          ),
         },
       }));
     } catch (err) {
@@ -1264,10 +1314,14 @@ export default function Home() {
           footageLoading: false,
           footageError:
             err instanceof Error ? err.message : "Ошибка поиска видео",
-          manualGroups: groups.map((group) => ({
-            ...group,
-            slots: group.slots.map((slot) => ({ ...slot, loading: false })),
-          })),
+          manualGroups: applyManualSlotDurations(
+            groups.map((group) => ({
+              ...group,
+              slots: group.slots.map((slot) => ({ ...slot, loading: false })),
+            })),
+            prev[videoId]?.audioDuration ?? null,
+            language
+          ),
         },
       }));
     }
@@ -1351,6 +1405,11 @@ export default function Home() {
       return;
     }
 
+    const isSameQuery = slot.lastSearchQuery === searchQuery;
+    const page = isSameQuery
+      ? Math.floor(Math.random() * 15) + 1
+      : 1;
+
     updateManualGroups(videoId, (groups) =>
       groups.map((item, gi) =>
         gi !== groupIndex
@@ -1378,7 +1437,7 @@ export default function Home() {
     }));
 
     try {
-      const results = await searchFootageVideos([searchQuery]);
+      const results = await searchFootageVideos([searchQuery], [page]);
 
       updateManualGroups(videoId, (groups) =>
         groups.map((item, gi) => {
@@ -1396,6 +1455,8 @@ export default function Home() {
               return {
                 ...s,
                 query: rawQuery,
+                lastSearchQuery: searchQuery,
+                searchPage: page,
                 videos: results.filter((video) => video.query === searchQuery),
                 loading: false,
                 selectedIndex: 0,
@@ -1629,17 +1690,31 @@ export default function Home() {
       const audioDuration = audioBuffer.duration;
       await audioContext.close();
 
-      setScripts((prev) => ({
-        ...prev,
-        [videoId]: {
-          ...prev[videoId],
-          voiceLoading: false,
-          voiceError: null,
-          voiceAudioUrl: audioUrl,
-          voiceAudioBlob: blob,
-          audioDuration,
-        },
-      }));
+      setScripts((prev) => {
+        const panel = prev[videoId];
+        const language = panel?.language ?? "ru";
+        const manualGroups =
+          panel?.clipMode === "manual" && panel.manualGroups.length > 0
+            ? applyManualSlotDurations(
+                panel.manualGroups,
+                audioDuration,
+                language
+              )
+            : panel?.manualGroups ?? [];
+
+        return {
+          ...prev,
+          [videoId]: {
+            ...panel,
+            voiceLoading: false,
+            voiceError: null,
+            voiceAudioUrl: audioUrl,
+            voiceAudioBlob: blob,
+            audioDuration,
+            manualGroups,
+          },
+        };
+      });
 
       const queries = getFootageQueries(script, selectedHook);
       if (queries.length) {
@@ -1725,14 +1800,20 @@ export default function Home() {
     let durations: number[];
 
     if (isManual) {
+      const groupsWithDurations = applyManualSlotDurations(
+        panel.manualGroups,
+        panel.audioDuration ?? 0,
+        panel.language ?? "ru"
+      );
       const calculated =
         manualCalculated ??
-        getManualSlotCalculatedDurations(
-          panel.manualGroups,
-          panel.audioDuration ?? 0,
-          panel.language ?? "ru"
+        groupsWithDurations.map(
+          (group) => group.slotDurations ?? [0, 0, 0]
         );
-      const payload = collectManualMergePayload(panel.manualGroups, calculated);
+      const payload = collectManualMergePayload(
+        groupsWithDurations,
+        calculated
+      );
 
       if (payload.clips.length === 0) {
         setScripts((prev) => ({
@@ -2226,10 +2307,9 @@ export default function Home() {
                                     : `${panel.selectedHook === i ? "✓ " : ""}Хук ${i + 1}`}
                                 </span>
                                 {panel.copiedHook !== i && (
-                                  <ScriptHookText
-                                    hook={hook}
-                                    language={panel.language ?? "ru"}
-                                  />
+                                  <p className="mt-1 leading-snug text-zinc-200">
+                                    {renderWithTranslation(hook)}
+                                  </p>
                                 )}
                               </button>
                             ))}
@@ -2241,7 +2321,7 @@ export default function Home() {
                             Основная часть
                           </h3>
                           <p className="whitespace-pre-wrap leading-relaxed text-zinc-300">
-                            <ScriptTextWithTranslation text={panel.data.body} />
+                            {renderWithTranslation(panel.data.body)}
                           </p>
                         </div>
 
@@ -2250,7 +2330,7 @@ export default function Home() {
                             CTA
                           </h3>
                           <p className="leading-relaxed text-zinc-300">
-                            <ScriptTextWithTranslation text={panel.data.cta} />
+                            {renderWithTranslation(panel.data.cta)}
                           </p>
                         </div>
 
@@ -2259,9 +2339,7 @@ export default function Home() {
                             Визуальный хук
                           </h3>
                           <p className="leading-relaxed text-zinc-300">
-                            <ScriptTextWithTranslation
-                              text={panel.data.visualHook}
-                            />
+                            {renderWithTranslation(panel.data.visualHook)}
                           </p>
                         </div>
 
@@ -2467,9 +2545,7 @@ export default function Home() {
                                   >
                                     <div className="mb-2 space-y-1">
                                       <p className="text-xs leading-snug text-zinc-300">
-                                        <ScriptTextWithTranslation
-                                          text={displayText}
-                                        />
+                                        {renderWithTranslation(displayText)}
                                       </p>
                                       <FootageQueryInput
                                         key={`${video.videoId}-${queryIndex}-${group.originalQuery}`}
