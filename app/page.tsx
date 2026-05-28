@@ -11,6 +11,7 @@ import type {
 } from "./api/search-youtube/route";
 
 type FootageGroup = {
+  originalQuery: string;
   query: string;
   videos: SearchVideoResult[];
   loading: boolean;
@@ -170,6 +171,10 @@ function formatCopyAllScript(
   );
 }
 
+function stripTranslation(text: string): string {
+  return text.replace(/\s*\([^)]*\)\s*/g, " ").trim();
+}
+
 function formatVoiceScript(
   script: ScriptResult,
   selectedHook: number | null
@@ -177,7 +182,10 @@ function formatVoiceScript(
   const hookIndex = getSelectedHookIndex(selectedHook);
   const hook = script.hooks[hookIndex] ?? script.hooks[0] ?? "";
 
-  return [hook, script.body, script.cta].filter(Boolean).join("\n\n");
+  return [hook, script.body, script.cta]
+    .map(stripTranslation)
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function toggleLanguage(
@@ -221,13 +229,13 @@ function toPexelsSearchQuery(query: string): string {
 }
 
 function segmentTextForDuration(
-  query: string,
+  originalQuery: string,
   language: ScriptLanguage
 ): string {
   if (language === "ru") {
-    return query;
+    return originalQuery;
   }
-  return toPexelsSearchQuery(query);
+  return toPexelsSearchQuery(originalQuery);
 }
 
 function buildFootageGroups(
@@ -237,11 +245,14 @@ function buildFootageGroups(
   previousGroups: FootageGroup[] = []
 ): FootageGroup[] {
   return displayQueries.map((query, index) => {
-    const search = searchQueries[index] ?? query;
-    const previous = previousGroups.find((group) => group.query === query);
+    const search = searchQueries[index] ?? toPexelsSearchQuery(query);
+    const previous =
+      previousGroups[index] ??
+      previousGroups.find((group) => group.originalQuery === query);
 
     return {
-      query,
+      originalQuery: previous?.originalQuery ?? query,
+      query: previous?.query ?? search,
       videos: results.filter((video) => video.query === search),
       loading: false,
       selectedIndex: previous?.selectedIndex ?? 0,
@@ -286,6 +297,46 @@ function estimateSegmentDurations(
 
   return charCounts.map(
     (c) => Math.round((c / totalChars) * totalAudioDuration * 10) / 10
+  );
+}
+
+function FootageQueryInput({
+  defaultQuery,
+  disabled,
+  onBlurCommit,
+  onSearch,
+}: {
+  defaultQuery: string;
+  disabled: boolean;
+  onBlurCommit: (value: string) => void;
+  onSearch: (value: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="flex gap-2">
+      <input
+        ref={inputRef}
+        type="text"
+        defaultValue={defaultQuery}
+        disabled={disabled}
+        onBlur={(e) => onBlurCommit(e.target.value.trim())}
+        className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+        placeholder="Запрос для Pexels"
+      />
+      <button
+        type="button"
+        title="Найти другое"
+        disabled={disabled}
+        onClick={() => {
+          const value = inputRef.current?.value.trim() ?? defaultQuery;
+          onSearch(value);
+        }}
+        className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+      >
+        🔄
+      </button>
+    </div>
   );
 }
 
@@ -578,8 +629,9 @@ export default function Home() {
         footageLoading: true,
         footageError: null,
         openFootageIndex: null,
-        footageGroups: displayQueries.map((query) => ({
-          query,
+        footageGroups: items.map((item) => ({
+          originalQuery: item.display,
+          query: item.search,
           videos: [],
           loading: true,
           selectedIndex: 0,
@@ -617,7 +669,7 @@ export default function Home() {
     }
   };
 
-  const handleFootageQueryChange = (
+  const commitFootageQuery = (
     videoId: string,
     queryIndex: number,
     query: string
@@ -635,10 +687,16 @@ export default function Home() {
 
   const handleSearchFootageGroup = async (
     videoId: string,
-    queryIndex: number
+    queryIndex: number,
+    queryFromInput?: string
   ) => {
     const group = scripts[videoId]?.footageGroups[queryIndex];
-    const searchQuery = group ? toPexelsSearchQuery(group.query) : "";
+    if (!group) {
+      return;
+    }
+
+    const rawQuery = (queryFromInput ?? group.query).trim();
+    const searchQuery = toPexelsSearchQuery(rawQuery);
     if (!searchQuery) {
       return;
     }
@@ -650,7 +708,13 @@ export default function Home() {
         footageError: null,
         footageGroups: prev[videoId].footageGroups.map((item, index) =>
           index === queryIndex
-            ? { ...item, loading: true, videos: [], selectedIndex: 0 }
+            ? {
+                ...item,
+                query: rawQuery,
+                loading: true,
+                videos: [],
+                selectedIndex: 0,
+              }
             : item
         ),
       },
@@ -658,7 +722,6 @@ export default function Home() {
 
     try {
       const results = await searchFootageVideos([searchQuery]);
-      const displayQuery = group!.query;
 
       setScripts((prev) => ({
         ...prev,
@@ -670,7 +733,8 @@ export default function Home() {
             }
 
             return {
-              query: displayQuery,
+              originalQuery: item.originalQuery,
+              query: rawQuery,
               videos: results.filter((video) => video.query === searchQuery),
               loading: false,
               selectedIndex: 0,
@@ -728,7 +792,8 @@ export default function Home() {
         footageGroups: [
           ...prev[videoId].footageGroups,
           {
-            query,
+            originalQuery: query,
+            query: toPexelsSearchQuery(query),
             videos: [],
             loading: true,
             selectedIndex: 0,
@@ -745,7 +810,7 @@ export default function Home() {
       setScripts((prev) => {
         const groups = [...prev[videoId].footageGroups];
         const index = groups.findLastIndex(
-          (group) => group.query === query && group.loading
+          (group) => group.originalQuery === query && group.loading
         );
 
         if (index >= 0) {
@@ -993,7 +1058,7 @@ export default function Home() {
       const footageTexts = panel.footageGroups
         .filter((group) => !group.loading && group.videos.length > 0)
         .map((group) =>
-          segmentTextForDuration(group.query, panel.language ?? "ru")
+          segmentTextForDuration(group.originalQuery, panel.language ?? "ru")
         );
       const durations = estimateSegmentDurations(footageTexts, audioDuration);
 
@@ -1274,7 +1339,10 @@ export default function Home() {
                 panel.footageGroups.length > 0
                   ? estimateSegmentDurations(
                       panel.footageGroups.map((g) =>
-                        segmentTextForDuration(g.query, panel.language ?? "ru")
+                        segmentTextForDuration(
+                          g.originalQuery,
+                          panel.language ?? "ru"
+                        )
                       ),
                       panel.audioDuration
                     )
@@ -1560,53 +1628,52 @@ export default function Home() {
 
                                   const russianTranslation =
                                     panel.language !== "ru"
-                                      ? parseRussianTranslation(group.query)
+                                      ? parseRussianTranslation(
+                                          group.originalQuery
+                                        )
                                       : null;
-                                  const displayQuery =
+                                  const scriptLine =
                                     panel.language !== "ru"
-                                      ? toPexelsSearchQuery(group.query)
-                                      : group.query;
+                                      ? toPexelsSearchQuery(group.originalQuery)
+                                      : group.originalQuery;
 
                                   return (
-                                  <div key={`${group.query}-${queryIndex}`}>
+                                  <div
+                                    key={`${group.originalQuery}-${queryIndex}`}
+                                  >
                                     <div className="mb-2 space-y-1">
                                       <p className="text-xs leading-snug text-zinc-300">
-                                        {displayQuery}
+                                        {scriptLine}
                                       </p>
                                       {russianTranslation && (
                                         <p className="text-xs italic leading-snug text-zinc-500">
                                           {russianTranslation}
                                         </p>
                                       )}
-                                      <div className="flex gap-2">
-                                        <input
-                                          type="text"
-                                          value={group.query}
-                                          onChange={(e) =>
-                                            handleFootageQueryChange(
-                                              video.videoId,
-                                              queryIndex,
-                                              e.target.value
-                                            )
-                                          }
-                                          className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
-                                          placeholder="Запрос для Pexels"
-                                        />
-                                        <button
-                                          type="button"
-                                          title="Найти другое"
-                                          disabled={group.loading}
-                                          onClick={() =>
-                                            void handleSearchFootageGroup(
-                                              video.videoId,
-                                              queryIndex
-                                            )
-                                          }
-                                          className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
-                                        >
-                                          🔄
-                                        </button>
-                                      </div>
+                                      <FootageQueryInput
+                                        key={`${video.videoId}-${queryIndex}-${group.originalQuery}`}
+                                        defaultQuery={group.query}
+                                        disabled={group.loading}
+                                        onBlurCommit={(value) =>
+                                          commitFootageQuery(
+                                            video.videoId,
+                                            queryIndex,
+                                            value
+                                          )
+                                        }
+                                        onSearch={(value) => {
+                                          commitFootageQuery(
+                                            video.videoId,
+                                            queryIndex,
+                                            value
+                                          );
+                                          void handleSearchFootageGroup(
+                                            video.videoId,
+                                            queryIndex,
+                                            value
+                                          );
+                                        }}
+                                      />
                                     </div>
 
                                     {group.loading ? (
