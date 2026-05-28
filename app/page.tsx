@@ -203,6 +203,20 @@ function stripTranslation(text: string): string {
   return text.replace(/\s*\([^)]*\)\s*/g, " ").trim();
 }
 
+function extractTranslations(text: string): string[] {
+  const matches = text.match(/\(([^)]+)\)/g);
+  return matches ? matches.map((match) => match.slice(1, -1)) : [];
+}
+
+function getPreservedTranslation(text: string): string | null {
+  const trailing = parseRussianTranslation(text);
+  if (trailing) {
+    return trailing;
+  }
+  const translations = extractTranslations(text);
+  return translations.length > 0 ? translations[translations.length - 1]! : null;
+}
+
 function formatVoiceScript(
   script: ScriptResult,
   selectedHook: number | null
@@ -281,15 +295,21 @@ function combineWithTranslation(
 const SCRIPT_TEXTAREA_CLASS =
   "w-full resize-none overflow-hidden rounded-lg border border-transparent bg-zinc-900 px-3 py-2 text-sm leading-relaxed text-zinc-100 outline-none transition-colors placeholder:text-zinc-500 focus:border-zinc-600";
 
+const TRANSLATION_BLOCK_STYLE = {
+  color: "#888",
+  fontStyle: "italic" as const,
+  fontSize: "0.85em",
+};
+
 function ScriptEditableTextarea({
   value,
-  translation,
+  translations = [],
   onChange,
   minRows = 2,
   onClick,
 }: {
   value: string;
-  translation: string | null;
+  translations?: string[];
   onChange: (main: string) => void;
   minRows?: number;
   onClick?: (event: MouseEvent<HTMLTextAreaElement>) => void;
@@ -321,11 +341,11 @@ function ScriptEditableTextarea({
         onInput={(event) => adjustHeight(event.currentTarget)}
         className={SCRIPT_TEXTAREA_CLASS}
       />
-      {translation && (
-        <p className="text-xs leading-snug" style={TRANSLATION_STYLE}>
+      {translations.map((translation, index) => (
+        <div key={index} style={TRANSLATION_BLOCK_STYLE}>
           {translation}
-        </p>
-      )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -1751,8 +1771,8 @@ export default function Home() {
       }
 
       const previousHook = panel.data.hooks[index] ?? "";
-      const translation = parseRussianTranslation(previousHook);
-      const fullText = combineWithTranslation(main, translation);
+      const preservedTranslation = getPreservedTranslation(previousHook);
+      const fullText = combineWithTranslation(main, preservedTranslation);
       const hookMain = stripTranslation(fullText).trim();
       const selectedIndex = getSelectedHookIndex(panel.selectedHook);
       const language = panel.language ?? "ru";
@@ -1777,7 +1797,9 @@ export default function Home() {
                 ...group,
                 originalText: hookMain,
                 translation:
-                  language !== "ru" && translation ? translation : "",
+                  language !== "ru" && preservedTranslation
+                    ? preservedTranslation
+                    : "",
                 slots: group.slots.map((slot) => ({
                   ...slot,
                   query: hookMain,
@@ -1806,14 +1828,14 @@ export default function Home() {
         return prev;
       }
 
-      const translation = parseRussianTranslation(panel.data.body);
+      const preservedTranslation = getPreservedTranslation(panel.data.body);
       return {
         ...prev,
         [videoId]: {
           ...panel,
           data: {
             ...panel.data,
-            body: combineWithTranslation(main, translation),
+            body: combineWithTranslation(main, preservedTranslation),
           },
         },
       };
@@ -1827,14 +1849,14 @@ export default function Home() {
         return prev;
       }
 
-      const translation = parseRussianTranslation(panel.data.cta);
+      const preservedTranslation = getPreservedTranslation(panel.data.cta);
       return {
         ...prev,
         [videoId]: {
           ...panel,
           data: {
             ...panel.data,
-            cta: combineWithTranslation(main, translation),
+            cta: combineWithTranslation(main, preservedTranslation),
           },
         },
       };
@@ -2541,9 +2563,6 @@ export default function Home() {
                           </h3>
                           <div className="space-y-2">
                             {panel.data.hooks.map((hook, i) => {
-                              const { main, translation } =
-                                splitTextWithTranslation(hook);
-
                               return (
                                 <div
                                   key={i}
@@ -2587,8 +2606,8 @@ export default function Home() {
                                     </button>
                                   </div>
                                   <ScriptEditableTextarea
-                                    value={main}
-                                    translation={translation}
+                                    value={stripTranslation(hook)}
+                                    translations={extractTranslations(hook)}
                                     minRows={2}
                                     onClick={(event) => event.stopPropagation()}
                                     onChange={(nextMain) =>
@@ -2610,13 +2629,8 @@ export default function Home() {
                             Основная часть
                           </h3>
                           <ScriptEditableTextarea
-                            value={
-                              splitTextWithTranslation(panel.data.body).main
-                            }
-                            translation={
-                              splitTextWithTranslation(panel.data.body)
-                                .translation
-                            }
+                            value={stripTranslation(panel.data.body)}
+                            translations={extractTranslations(panel.data.body)}
                             minRows={4}
                             onChange={(main) =>
                               updateScriptBody(video.videoId, main)
@@ -2629,13 +2643,8 @@ export default function Home() {
                             CTA
                           </h3>
                           <ScriptEditableTextarea
-                            value={
-                              splitTextWithTranslation(panel.data.cta).main
-                            }
-                            translation={
-                              splitTextWithTranslation(panel.data.cta)
-                                .translation
-                            }
+                            value={stripTranslation(panel.data.cta)}
+                            translations={extractTranslations(panel.data.cta)}
                             minRows={2}
                             onChange={(main) =>
                               updateScriptCta(video.videoId, main)
