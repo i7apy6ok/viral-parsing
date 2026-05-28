@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import type { ScriptResult } from "./api/generate-script/route";
 import type { SearchVideoResult } from "./api/search-videos/route";
 import type {
@@ -259,6 +265,69 @@ function splitTextWithTranslation(text: string): {
     main: toPexelsSearchQuery(text),
     translation,
   };
+}
+
+function combineWithTranslation(
+  main: string,
+  translation: string | null
+): string {
+  const trimmed = main.trim();
+  if (!translation) {
+    return trimmed;
+  }
+  return `${trimmed} (${translation})`;
+}
+
+const SCRIPT_TEXTAREA_CLASS =
+  "w-full resize-none overflow-hidden rounded-lg border border-transparent bg-zinc-900 px-3 py-2 text-sm leading-relaxed text-zinc-100 outline-none transition-colors placeholder:text-zinc-500 focus:border-zinc-600";
+
+function ScriptEditableTextarea({
+  value,
+  translation,
+  onChange,
+  minRows = 2,
+  onClick,
+}: {
+  value: string;
+  translation: string | null;
+  onChange: (main: string) => void;
+  minRows?: number;
+  onClick?: (event: MouseEvent<HTMLTextAreaElement>) => void;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const adjustHeight = (element: HTMLTextAreaElement) => {
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  };
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      adjustHeight(textareaRef.current);
+    }
+  }, [value]);
+
+  return (
+    <div className="space-y-1">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        rows={minRows}
+        onClick={onClick}
+        onChange={(event) => {
+          onChange(event.target.value);
+          adjustHeight(event.target);
+        }}
+        onInput={(event) => adjustHeight(event.currentTarget)}
+        className={SCRIPT_TEXTAREA_CLASS}
+      />
+      {translation && (
+        <p className="text-xs leading-snug" style={TRANSLATION_STYLE}>
+          {translation}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function renderWithTranslation(text: string): ReactNode {
@@ -1670,6 +1739,108 @@ export default function Home() {
     }
   };
 
+  const updateScriptHook = (
+    videoId: string,
+    index: number,
+    main: string
+  ) => {
+    setScripts((prev) => {
+      const panel = prev[videoId];
+      if (!panel?.data) {
+        return prev;
+      }
+
+      const previousHook = panel.data.hooks[index] ?? "";
+      const translation = parseRussianTranslation(previousHook);
+      const fullText = combineWithTranslation(main, translation);
+      const hookMain = stripTranslation(fullText).trim();
+      const selectedIndex = getSelectedHookIndex(panel.selectedHook);
+      const language = panel.language ?? "ru";
+
+      const hooks = [...panel.data.hooks];
+      hooks[index] = fullText;
+
+      let footageGroups = panel.footageGroups;
+      if (index === selectedIndex && footageGroups.length > 0) {
+        footageGroups = footageGroups.map((group, groupIndex) =>
+          groupIndex === 0
+            ? { ...group, originalQuery: fullText }
+            : group
+        );
+      }
+
+      let manualGroups = panel.manualGroups;
+      if (index === selectedIndex && manualGroups.length > 0) {
+        manualGroups = manualGroups.map((group, groupIndex) =>
+          groupIndex === 0
+            ? {
+                ...group,
+                originalText: hookMain,
+                translation:
+                  language !== "ru" && translation ? translation : "",
+                slots: group.slots.map((slot) => ({
+                  ...slot,
+                  query: hookMain,
+                })),
+              }
+            : group
+        );
+      }
+
+      return {
+        ...prev,
+        [videoId]: {
+          ...panel,
+          data: { ...panel.data, hooks },
+          footageGroups,
+          manualGroups,
+        },
+      };
+    });
+  };
+
+  const updateScriptBody = (videoId: string, main: string) => {
+    setScripts((prev) => {
+      const panel = prev[videoId];
+      if (!panel?.data) {
+        return prev;
+      }
+
+      const translation = parseRussianTranslation(panel.data.body);
+      return {
+        ...prev,
+        [videoId]: {
+          ...panel,
+          data: {
+            ...panel.data,
+            body: combineWithTranslation(main, translation),
+          },
+        },
+      };
+    });
+  };
+
+  const updateScriptCta = (videoId: string, main: string) => {
+    setScripts((prev) => {
+      const panel = prev[videoId];
+      if (!panel?.data) {
+        return prev;
+      }
+
+      const translation = parseRussianTranslation(panel.data.cta);
+      return {
+        ...prev,
+        [videoId]: {
+          ...panel,
+          data: {
+            ...panel.data,
+            cta: combineWithTranslation(main, translation),
+          },
+        },
+      };
+    });
+  };
+
   const handleCopyHook = async (
     videoId: string,
     index: number,
@@ -2369,31 +2540,68 @@ export default function Home() {
                             Хуки — выбери ✓ и нажми, чтобы скопировать
                           </h3>
                           <div className="space-y-2">
-                            {panel.data.hooks.map((hook, i) => (
-                              <button
-                                key={i}
-                                type="button"
-                                onClick={() =>
-                                  handleCopyHook(video.videoId, i, hook)
-                                }
-                                className={`w-full rounded-lg border px-3 py-2 text-left text-zinc-200 transition-colors hover:border-amber-500/50 hover:bg-zinc-800 ${
-                                  panel.selectedHook === i
-                                    ? "border-amber-500/60 bg-zinc-800"
-                                    : "border-zinc-700 bg-zinc-900"
-                                }`}
-                              >
-                                <span className="text-xs text-amber-400/80">
-                                  {panel.copiedHook === i
-                                    ? "Скопировано!"
-                                    : `${panel.selectedHook === i ? "✓ " : ""}Хук ${i + 1}`}
-                                </span>
-                                {panel.copiedHook !== i && (
-                                  <p className="mt-1 leading-snug text-zinc-200">
-                                    {renderWithTranslation(hook)}
-                                  </p>
-                                )}
-                              </button>
-                            ))}
+                            {panel.data.hooks.map((hook, i) => {
+                              const { main, translation } =
+                                splitTextWithTranslation(hook);
+
+                              return (
+                                <div
+                                  key={i}
+                                  className={`rounded-lg border px-3 py-2 transition-colors ${
+                                    panel.selectedHook === i
+                                      ? "border-amber-500/60 bg-zinc-800"
+                                      : "border-zinc-700 bg-zinc-900"
+                                  }`}
+                                >
+                                  <div className="mb-2 flex items-center justify-between gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setScripts((prev) => ({
+                                          ...prev,
+                                          [video.videoId]: {
+                                            ...prev[video.videoId],
+                                            selectedHook: i,
+                                          },
+                                        }))
+                                      }
+                                      className="text-xs text-amber-400/80 transition-colors hover:text-amber-300"
+                                    >
+                                      {panel.selectedHook === i ? "✓ " : ""}
+                                      Хук {i + 1}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void handleCopyHook(
+                                          video.videoId,
+                                          i,
+                                          panel.data!.hooks[i]
+                                        )
+                                      }
+                                      className="text-xs text-zinc-400 transition-colors hover:text-zinc-200"
+                                    >
+                                      {panel.copiedHook === i
+                                        ? "Скопировано!"
+                                        : "Копировать"}
+                                    </button>
+                                  </div>
+                                  <ScriptEditableTextarea
+                                    value={main}
+                                    translation={translation}
+                                    minRows={2}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onChange={(nextMain) =>
+                                      updateScriptHook(
+                                        video.videoId,
+                                        i,
+                                        nextMain
+                                      )
+                                    }
+                                  />
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
 
@@ -2401,18 +2609,38 @@ export default function Home() {
                           <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
                             Основная часть
                           </h3>
-                          <p className="whitespace-pre-wrap leading-relaxed text-zinc-300">
-                            {renderWithTranslation(panel.data.body)}
-                          </p>
+                          <ScriptEditableTextarea
+                            value={
+                              splitTextWithTranslation(panel.data.body).main
+                            }
+                            translation={
+                              splitTextWithTranslation(panel.data.body)
+                                .translation
+                            }
+                            minRows={4}
+                            onChange={(main) =>
+                              updateScriptBody(video.videoId, main)
+                            }
+                          />
                         </div>
 
                         <div>
                           <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
                             CTA
                           </h3>
-                          <p className="leading-relaxed text-zinc-300">
-                            {renderWithTranslation(panel.data.cta)}
-                          </p>
+                          <ScriptEditableTextarea
+                            value={
+                              splitTextWithTranslation(panel.data.cta).main
+                            }
+                            translation={
+                              splitTextWithTranslation(panel.data.cta)
+                                .translation
+                            }
+                            minRows={2}
+                            onChange={(main) =>
+                              updateScriptCta(video.videoId, main)
+                            }
+                          />
                         </div>
 
                         <button
