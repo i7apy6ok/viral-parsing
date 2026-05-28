@@ -18,6 +18,13 @@ type FootageGroup = {
 };
 
 type ClipMode = "sentences" | "blocks";
+type ScriptLanguage = "ru" | "en" | "es";
+
+const SCRIPT_LANGUAGE_OPTIONS: { value: ScriptLanguage; label: string }[] = [
+  { value: "ru", label: "🇷🇺 Русский" },
+  { value: "en", label: "🇬🇧 English" },
+  { value: "es", label: "🇪🇸 Español" },
+];
 
 type ScriptPanelState = {
   loading: boolean;
@@ -35,6 +42,7 @@ type ScriptPanelState = {
   footageError: string | null;
   footageGroups: FootageGroup[];
   customFootageQuery: string;
+  language: ScriptLanguage;
   clipMode: ClipMode;
   mergeLoading: boolean;
   mergeStatus: string | null;
@@ -201,17 +209,40 @@ async function searchFootageVideos(
   return data as SearchVideoResult[];
 }
 
+function parseRussianTranslation(query: string): string | null {
+  const match = query.match(/\(([^)]+)\)\s*$/);
+  return match?.[1]?.trim() ?? null;
+}
+
+function toPexelsSearchQuery(query: string): string {
+  const trimmed = query.trim();
+  const withoutTranslation = trimmed.replace(/\s*\([^)]+\)\s*$/, "").trim();
+  return withoutTranslation || trimmed;
+}
+
+function segmentTextForDuration(
+  query: string,
+  language: ScriptLanguage
+): string {
+  if (language === "ru") {
+    return query;
+  }
+  return toPexelsSearchQuery(query);
+}
+
 function buildFootageGroups(
-  queries: string[],
+  displayQueries: string[],
+  searchQueries: string[],
   results: SearchVideoResult[],
   previousGroups: FootageGroup[] = []
 ): FootageGroup[] {
-  return queries.map((query) => {
+  return displayQueries.map((query, index) => {
+    const search = searchQueries[index] ?? query;
     const previous = previousGroups.find((group) => group.query === query);
 
     return {
       query,
-      videos: results.filter((video) => video.query === query),
+      videos: results.filter((video) => video.query === search),
       loading: false,
       selectedIndex: previous?.selectedIndex ?? 0,
     };
@@ -451,9 +482,12 @@ export default function Home() {
         voiceAudioUrl: null,
         voiceAudioBlob: null,
         audioDuration: null,
+        language: current?.language ?? "ru",
         ...FOOTAGE_DEFAULTS,
       },
     }));
+
+    const scriptLanguage = current?.language ?? "ru";
 
     try {
       const res = await fetch("/api/generate-script", {
@@ -464,6 +498,7 @@ export default function Home() {
           title: video.title,
           niche: keyword.trim(),
           offer: offer.trim(),
+          language: scriptLanguage,
         }),
       });
 
@@ -489,6 +524,7 @@ export default function Home() {
           voiceAudioUrl: null,
           voiceAudioBlob: null,
           audioDuration: null,
+          language: prev[id]?.language ?? "ru",
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -508,6 +544,7 @@ export default function Home() {
           voiceAudioUrl: null,
           voiceAudioBlob: null,
           audioDuration: null,
+          language: prev[id]?.language ?? "ru",
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -518,10 +555,21 @@ export default function Home() {
     videoId: string,
     queries: string[]
   ) => {
-    const trimmedQueries = queries.map((query) => query.trim()).filter(Boolean);
-    if (trimmedQueries.length === 0) {
+    const items = queries
+      .map((query) => query.trim())
+      .filter(Boolean)
+      .map((query) => ({
+        display: query,
+        search: toPexelsSearchQuery(query),
+      }))
+      .filter((item) => item.search);
+
+    if (items.length === 0) {
       return;
     }
+
+    const displayQueries = items.map((item) => item.display);
+    const searchQueries = items.map((item) => item.search);
 
     setScripts((prev) => ({
       ...prev,
@@ -530,7 +578,7 @@ export default function Home() {
         footageLoading: true,
         footageError: null,
         openFootageIndex: null,
-        footageGroups: trimmedQueries.map((query) => ({
+        footageGroups: displayQueries.map((query) => ({
           query,
           videos: [],
           loading: true,
@@ -540,7 +588,7 @@ export default function Home() {
     }));
 
     try {
-      const results = await searchFootageVideos(trimmedQueries);
+      const results = await searchFootageVideos(searchQueries);
 
       setScripts((prev) => ({
         ...prev,
@@ -549,7 +597,8 @@ export default function Home() {
           footageLoading: false,
           footageError: null,
           footageGroups: buildFootageGroups(
-            trimmedQueries,
+            displayQueries,
+            searchQueries,
             results,
             prev[videoId]?.footageGroups ?? []
           ),
@@ -563,6 +612,83 @@ export default function Home() {
           footageLoading: false,
           footageError:
             err instanceof Error ? err.message : "Ошибка поиска видео",
+        },
+      }));
+    }
+  };
+
+  const handleFootageQueryChange = (
+    videoId: string,
+    queryIndex: number,
+    query: string
+  ) => {
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        footageGroups: prev[videoId].footageGroups.map((group, index) =>
+          index === queryIndex ? { ...group, query } : group
+        ),
+      },
+    }));
+  };
+
+  const handleSearchFootageGroup = async (
+    videoId: string,
+    queryIndex: number
+  ) => {
+    const group = scripts[videoId]?.footageGroups[queryIndex];
+    const searchQuery = group ? toPexelsSearchQuery(group.query) : "";
+    if (!searchQuery) {
+      return;
+    }
+
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        footageError: null,
+        footageGroups: prev[videoId].footageGroups.map((item, index) =>
+          index === queryIndex
+            ? { ...item, loading: true, videos: [], selectedIndex: 0 }
+            : item
+        ),
+      },
+    }));
+
+    try {
+      const results = await searchFootageVideos([searchQuery]);
+      const displayQuery = group!.query;
+
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          footageGroups: prev[videoId].footageGroups.map((item, index) => {
+            if (index !== queryIndex) {
+              return item;
+            }
+
+            return {
+              query: displayQuery,
+              videos: results.filter((video) => video.query === searchQuery),
+              loading: false,
+              selectedIndex: 0,
+            };
+          }),
+        },
+      }));
+    } catch (err) {
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          footageLoading: false,
+          footageError:
+            err instanceof Error ? err.message : "Ошибка поиска видео",
+          footageGroups: prev[videoId].footageGroups.map((item, index) =>
+            index === queryIndex ? { ...item, loading: false } : item
+          ),
         },
       }));
     }
@@ -611,8 +737,10 @@ export default function Home() {
       },
     }));
 
+    const searchQuery = toPexelsSearchQuery(query);
+
     try {
-      const results = await searchFootageVideos([query]);
+      const results = await searchFootageVideos([searchQuery]);
 
       setScripts((prev) => {
         const groups = [...prev[videoId].footageGroups];
@@ -623,7 +751,7 @@ export default function Home() {
         if (index >= 0) {
           groups[index] = {
             ...groups[index],
-            videos: results,
+            videos: results.filter((video) => video.query === searchQuery),
             loading: false,
           };
         }
@@ -719,6 +847,7 @@ export default function Home() {
         voiceAudioUrl: null,
         voiceAudioBlob: null,
         audioDuration: null,
+        language: prev[videoId]?.language ?? "ru",
         ...FOOTAGE_DEFAULTS,
       },
     }));
@@ -782,6 +911,7 @@ export default function Home() {
           voiceAudioUrl: null,
           voiceAudioBlob: null,
           audioDuration: null,
+          language: prev[videoId]?.language ?? "ru",
         },
       }));
     }
@@ -862,7 +992,9 @@ export default function Home() {
 
       const footageTexts = panel.footageGroups
         .filter((group) => !group.loading && group.videos.length > 0)
-        .map((group) => group.query);
+        .map((group) =>
+          segmentTextForDuration(group.query, panel.language ?? "ru")
+        );
       const durations = estimateSegmentDurations(footageTexts, audioDuration);
 
       const clipUrls = selectedClips.map((clip) => clip.url);
@@ -1141,7 +1273,9 @@ export default function Home() {
                 panel.audioDuration != null &&
                 panel.footageGroups.length > 0
                   ? estimateSegmentDurations(
-                      panel.footageGroups.map((g) => g.query),
+                      panel.footageGroups.map((g) =>
+                        segmentTextForDuration(g.query, panel.language ?? "ru")
+                      ),
                       panel.audioDuration
                     )
                   : null;
@@ -1185,6 +1319,34 @@ export default function Home() {
                   >
                     Открыть видео
                   </a>
+                  <ToggleGroup
+                    label="Язык сценария и озвучки"
+                    value={panel?.language ?? "ru"}
+                    onChange={(language) =>
+                      setScripts((prev) => ({
+                        ...prev,
+                        [video.videoId]: {
+                          ...(prev[video.videoId] ?? {
+                            loading: false,
+                            data: null,
+                            error: null,
+                            selectedHook: null,
+                            copiedHook: null,
+                            copiedAll: false,
+                            voiceLoading: false,
+                            voiceError: null,
+                            voiceAudioUrl: null,
+                            voiceAudioBlob: null,
+                            audioDuration: null,
+                            ...FOOTAGE_DEFAULTS,
+                          }),
+                          language,
+                        },
+                      }))
+                    }
+                    options={SCRIPT_LANGUAGE_OPTIONS}
+                  />
+
                   <button
                     type="button"
                     onClick={() => {
@@ -1335,6 +1497,21 @@ export default function Home() {
                             />
 
                             <ToggleGroup
+                              label="Язык сценария и озвучки"
+                              value={panel.language ?? "ru"}
+                              onChange={(language) =>
+                                setScripts((prev) => ({
+                                  ...prev,
+                                  [video.videoId]: {
+                                    ...prev[video.videoId],
+                                    language,
+                                  },
+                                }))
+                              }
+                              options={SCRIPT_LANGUAGE_OPTIONS}
+                            />
+
+                            <ToggleGroup
                               label="Режим подбора футажа"
                               value={panel.clipMode}
                               onChange={(mode) =>
@@ -1381,11 +1558,56 @@ export default function Home() {
                                         ]
                                       : null;
 
+                                  const russianTranslation =
+                                    panel.language !== "ru"
+                                      ? parseRussianTranslation(group.query)
+                                      : null;
+                                  const displayQuery =
+                                    panel.language !== "ru"
+                                      ? toPexelsSearchQuery(group.query)
+                                      : group.query;
+
                                   return (
                                   <div key={`${group.query}-${queryIndex}`}>
-                                    <p className="mb-2 text-xs leading-snug text-zinc-400">
-                                      {group.query}
-                                    </p>
+                                    <div className="mb-2 space-y-1">
+                                      <p className="text-xs leading-snug text-zinc-300">
+                                        {displayQuery}
+                                      </p>
+                                      {russianTranslation && (
+                                        <p className="text-xs italic leading-snug text-zinc-500">
+                                          {russianTranslation}
+                                        </p>
+                                      )}
+                                      <div className="flex gap-2">
+                                        <input
+                                          type="text"
+                                          value={group.query}
+                                          onChange={(e) =>
+                                            handleFootageQueryChange(
+                                              video.videoId,
+                                              queryIndex,
+                                              e.target.value
+                                            )
+                                          }
+                                          className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+                                          placeholder="Запрос для Pexels"
+                                        />
+                                        <button
+                                          type="button"
+                                          title="Найти другое"
+                                          disabled={group.loading}
+                                          onClick={() =>
+                                            void handleSearchFootageGroup(
+                                              video.videoId,
+                                              queryIndex
+                                            )
+                                          }
+                                          className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+                                        >
+                                          🔄
+                                        </button>
+                                      </div>
+                                    </div>
 
                                     {group.loading ? (
                                       <div className="flex justify-center py-4">

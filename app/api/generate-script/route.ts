@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { getTranscript } from "@/lib/getTranscript";
 
+type ScriptLanguage = "ru" | "en" | "es";
+
 type GenerateScriptBody = {
   videoId: string;
   title: string;
   niche: string;
   offer?: string;
+  language?: ScriptLanguage;
 };
 
 export type ScriptResult = {
@@ -20,11 +23,25 @@ export type ScriptResult = {
 
 const CLAUDE_MODEL = "claude-sonnet-4-6";
 
+const LANGUAGE_LABELS: Record<ScriptLanguage, string> = {
+  ru: "русский",
+  en: "английский",
+  es: "испанский",
+};
+
+function normalizeLanguage(language: unknown): ScriptLanguage {
+  if (language === "en" || language === "es" || language === "ru") {
+    return language;
+  }
+  return "ru";
+}
+
 function buildPrompt(
   niche: string,
   title: string,
   transcript: string | null,
-  offer?: string
+  offer?: string,
+  language: ScriptLanguage = "ru"
 ): string {
   const offerTrimmed = offer?.trim() ?? "";
   const ctaInstruction = offerTrimmed
@@ -63,8 +80,17 @@ ${ctaInstruction}
 
 6. ПРЕДЛОЖЕНИЯ (sentences):
 Разбей основную часть (body) на отдельные предложения — каждое предложение отдельный элемент массива sentences.
-
-Отвечай структурированно, на русском языке.
+${
+  language !== "ru"
+    ? `
+ЯЗЫК СЦЕНАРИЯ: ${LANGUAGE_LABELS[language]}.
+Пиши хуки, body, cta, visualHook и каждый элемент sentences на ${LANGUAGE_LABELS[language]} языке.
+В КОНЦЕ каждой фразы в hooks, body, cta, visualHook и каждого элемента sentences добавляй перевод на русский в круглых скобках.
+Пример: "Hello world (Привет мир)".
+videoQueries для Pexels — только на английском, без скобок и без перевода.`
+    : `
+Отвечай структурированно, на русском языке.`
+}
 
 В конце верни ТОЛЬКО валидный JSON (без markdown и пояснений) в формате:
 {"hooks":["текст хука 1","текст хука 2","текст хука 3"],"body":"основная часть","cta":"призыв к действию","visualHook":"визуальный хук","videoQueries":["query 1","query 2","query 3","query 4","query 5"],"sentences":["Предложение 1.","Предложение 2.","Предложение 3."]}`;
@@ -238,7 +264,8 @@ async function generateWithClaude(
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Partial<GenerateScriptBody>;
-    const { videoId, title, niche, offer } = body;
+    const { videoId, title, niche, offer, language: rawLanguage } = body;
+    const language = normalizeLanguage(rawLanguage);
 
     if (!videoId?.trim()) {
       return NextResponse.json({ error: "videoId is required" }, { status: 400 });
@@ -263,7 +290,8 @@ export async function POST(request: Request) {
       niche.trim(),
       title.trim(),
       transcript,
-      offer
+      offer,
+      language
     );
     const script = await generateWithClaude(prompt);
 
