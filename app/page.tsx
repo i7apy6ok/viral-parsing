@@ -22,6 +22,7 @@ type ManualSlot = {
   query: string;
   videos: SearchVideoResult[];
   loading: boolean;
+  searchError: string | null;
   selectedIndex: number;
   customDuration: number | null;
   lastSearchQuery: string;
@@ -401,6 +402,7 @@ function createManualSlot(initialQuery: string): ManualSlot {
     query: initialQuery,
     videos: [],
     loading: false,
+    searchError: null,
     selectedIndex: 0,
     customDuration: null,
     lastSearchQuery: "",
@@ -647,10 +649,80 @@ function ManualSlotDurationInput({
   );
 }
 
+function ManualFootageQueryInput({
+  inputRef,
+  syncedQuery,
+  loading,
+  searchError,
+  onBlurCommit,
+  onSearch,
+}: {
+  inputRef: (element: HTMLInputElement | null) => void;
+  syncedQuery: string;
+  loading: boolean;
+  searchError: string | null;
+  onBlurCommit: (value: string) => void;
+  onSearch: (value: string) => void;
+}) {
+  const localRef = useRef<HTMLInputElement | null>(null);
+
+  const setRefs = (element: HTMLInputElement | null) => {
+    localRef.current = element;
+    inputRef(element);
+  };
+
+  useEffect(() => {
+    if (
+      localRef.current &&
+      document.activeElement !== localRef.current &&
+      localRef.current.value !== syncedQuery
+    ) {
+      localRef.current.value = syncedQuery;
+    }
+  }, [syncedQuery]);
+
+  const runSearch = () => {
+    const value = localRef.current?.value.trim() ?? "";
+    onSearch(value);
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-2">
+        <input
+          ref={setRefs}
+          type="text"
+          onBlur={(e) => onBlurCommit(e.target.value.trim())}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              runSearch();
+            }
+          }}
+          className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+          placeholder="Свой запрос в Стоки"
+        />
+        <button
+          type="button"
+          title="Найти другое"
+          disabled={loading}
+          onClick={runSearch}
+          className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          🔄
+        </button>
+      </div>
+      {searchError && (
+        <p className="text-[10px] leading-snug text-red-400">{searchError}</p>
+      )}
+    </div>
+  );
+}
+
 function ManualFootageSlot({
   slot,
   calculatedDuration,
-  disabled,
+  inputRef,
   onBlurCommit,
   onSearch,
   onDurationChange,
@@ -658,7 +730,7 @@ function ManualFootageSlot({
 }: {
   slot: ManualSlot;
   calculatedDuration: number | null;
-  disabled: boolean;
+  inputRef: (element: HTMLInputElement | null) => void;
   onBlurCommit: (value: string) => void;
   onSearch: (value: string) => void;
   onDurationChange: (value: number) => void;
@@ -671,11 +743,13 @@ function ManualFootageSlot({
 
   return (
     <div className="min-w-0 flex-[0_0_30%] space-y-2">
-      <FootageQueryInput
-        disabled={disabled}
+      <ManualFootageQueryInput
+        inputRef={inputRef}
+        syncedQuery={slot.query}
+        loading={slot.loading}
+        searchError={slot.searchError}
         onBlurCommit={onBlurCommit}
         onSearch={onSearch}
-        enableEnterSearch
       />
 
       {slot.loading ? (
@@ -729,13 +803,19 @@ function ManualFootageSlot({
 }
 
 function ManualFootageSection({
+  videoId,
   panel,
+  slotInputRefs,
   onBlurCommit,
   onSearch,
   onDurationChange,
   onCycleVideo,
 }: {
+  videoId: string;
   panel: ScriptPanelState;
+  slotInputRefs: React.MutableRefObject<
+    Record<string, HTMLInputElement | null>
+  >;
   onBlurCommit: (
     groupIndex: number,
     slotIndex: number,
@@ -786,12 +866,16 @@ function ManualFootageSection({
               <ManualFootageSlot
                 key={`${groupIndex}-${slotIndex}`}
                 slot={slot}
+                inputRef={(element: HTMLInputElement | null) => {
+                  slotInputRefs.current[
+                    `${videoId}-${groupIndex}-${slotIndex}`
+                  ] = element;
+                }}
                 calculatedDuration={
                   group.slotDurations?.[slotIndex] ??
                   manualCalculated?.[groupIndex]?.[slotIndex] ??
                   null
                 }
-                disabled={slot.loading}
                 onBlurCommit={(value) =>
                   onBlurCommit(groupIndex, slotIndex, value)
                 }
@@ -909,7 +993,10 @@ export default function Home() {
     {}
   );
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(3);
+  const manualSlotInputRefs = useRef<Record<string, HTMLInputElement | null>>(
+    {}
+  );
+  const [visibleCount, setVisibleCount] = useState(4);
 
   const handleSearch = async () => {
     if (!keyword.trim()) {
@@ -922,7 +1009,7 @@ export default function Home() {
     setOpenVideoId(null);
     setVideos([]);
     setScripts({});
-    setVisibleCount(3);
+    setVisibleCount(4);
 
     const searchPayload = {
       keyword: keyword.trim(),
@@ -1393,8 +1480,13 @@ export default function Home() {
     }
 
     const group = scripts[videoId]?.manualGroups[groupIndex];
+    const refValue =
+      manualSlotInputRefs.current[
+        `${videoId}-${groupIndex}-${slotIndex}`
+      ]?.value.trim() ?? "";
     const rawQuery = (
       queryFromInput?.trim() ||
+      refValue ||
       slot.query.trim() ||
       (group
         ? toPexelsSearchQuery(group.originalText)
@@ -1423,6 +1515,7 @@ export default function Home() {
                       ...s,
                       query: rawQuery,
                       loading: true,
+                      searchError: null,
                       videos: [],
                       selectedIndex: 0,
                     }
@@ -1459,22 +1552,14 @@ export default function Home() {
                 searchPage: page,
                 videos: results.filter((video) => video.query === searchQuery),
                 loading: false,
+                searchError: null,
                 selectedIndex: 0,
               };
             }),
           };
         })
       );
-    } catch (err) {
-      setScripts((prev) => ({
-        ...prev,
-        [videoId]: {
-          ...prev[videoId],
-          footageError:
-            err instanceof Error ? err.message : "Ошибка поиска видео",
-        },
-      }));
-
+    } catch {
       updateManualGroups(videoId, (groups) =>
         groups.map((item, gi) =>
           gi !== groupIndex
@@ -1482,7 +1567,15 @@ export default function Home() {
             : {
                 ...item,
                 slots: item.slots.map((s, si) =>
-                  si !== slotIndex ? s : { ...s, loading: false }
+                  si !== slotIndex
+                    ? s
+                    : {
+                        ...s,
+                        query: rawQuery,
+                        loading: false,
+                        searchError:
+                          "Ошибка поиска, попробуй другой запрос",
+                      }
                 ),
               }
         )
@@ -2334,15 +2427,6 @@ export default function Home() {
                           </p>
                         </div>
 
-                        <div>
-                          <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                            Визуальный хук
-                          </h3>
-                          <p className="leading-relaxed text-zinc-300">
-                            {renderWithTranslation(panel.data.visualHook)}
-                          </p>
-                        </div>
-
                         <button
                           type="button"
                           onClick={() =>
@@ -2451,7 +2535,9 @@ export default function Home() {
                                   )}
 
                                   <ManualFootageSection
+                                    videoId={video.videoId}
                                     panel={panel}
+                                    slotInputRefs={manualSlotInputRefs}
                                     onBlurCommit={(groupIndex, slotIndex, value) =>
                                       commitManualSlotQuery(
                                         video.videoId,
@@ -2719,7 +2805,7 @@ export default function Home() {
           {videos.length > visibleCount && (
             <button
               type="button"
-              onClick={() => setVisibleCount((prev) => prev + 3)}
+              onClick={() => setVisibleCount((prev) => prev + 4)}
               className="w-full rounded-lg border border-zinc-700 py-3 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
             >
               Смотреть ещё ({videos.length - visibleCount} видео)
