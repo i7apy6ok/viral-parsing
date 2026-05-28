@@ -269,16 +269,26 @@ function getSelectedFootageClips(groups: FootageGroup[]): SearchVideoResult[] {
     );
 }
 
-function getFootageQueries(script: ScriptResult, clipMode: ClipMode): string[] {
-  if (clipMode === "sentences") {
-    return script.sentences
-      .map((sentence) => sentence.trim())
-      .filter(Boolean);
-  }
+function getFootageQueries(
+  script: ScriptResult,
+  clipMode: ClipMode,
+  selectedHook: number | null
+): string[] {
+  const hookIndex = getSelectedHookIndex(selectedHook);
+  const hook = stripTranslation(
+    script.hooks[hookIndex] ?? script.hooks[0] ?? ""
+  ).trim();
 
-  return script.videoQueries
-    .map((query) => query.trim())
-    .filter(Boolean);
+  const rest =
+    clipMode === "sentences"
+      ? script.sentences
+          .map((sentence) => sentence.trim())
+          .filter(Boolean)
+      : script.videoQueries
+          .map((query) => query.trim())
+          .filter(Boolean);
+
+  return hook ? [hook, ...rest] : rest;
 }
 
 function estimateSegmentDurations(
@@ -301,12 +311,10 @@ function estimateSegmentDurations(
 }
 
 function FootageQueryInput({
-  defaultQuery,
   disabled,
   onBlurCommit,
   onSearch,
 }: {
-  defaultQuery: string;
   disabled: boolean;
   onBlurCommit: (value: string) => void;
   onSearch: (value: string) => void;
@@ -318,18 +326,24 @@ function FootageQueryInput({
       <input
         ref={inputRef}
         type="text"
-        defaultValue={defaultQuery}
+        defaultValue=""
         disabled={disabled}
         onBlur={(e) => onBlurCommit(e.target.value.trim())}
         className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
-        placeholder="Запрос для Pexels"
+        placeholder="Свой запрос в Стоки"
       />
       <button
         type="button"
         title="Найти другое"
         disabled={disabled}
-        onClick={() => {
-          const value = inputRef.current?.value.trim() ?? defaultQuery;
+        onClick={(e) => {
+          const sibling = e.currentTarget
+            .previousElementSibling as HTMLInputElement | null;
+          const value = (
+            inputRef.current?.value ??
+            sibling?.value ??
+            ""
+          ).trim();
           onSearch(value);
         }}
         className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
@@ -695,7 +709,11 @@ export default function Home() {
       return;
     }
 
-    const rawQuery = (queryFromInput ?? group.query).trim();
+    const rawQuery = (
+      queryFromInput?.trim() ||
+      group.query.trim() ||
+      toPexelsSearchQuery(group.originalQuery)
+    ).trim();
     const searchQuery = toPexelsSearchQuery(rawQuery);
     if (!searchQuery) {
       return;
@@ -961,7 +979,7 @@ export default function Home() {
         },
       }));
 
-      const queries = getFootageQueries(script, "sentences");
+      const queries = getFootageQueries(script, "sentences", selectedHook);
       if (queries.length) {
         void loadFootageForVideo(videoId, queries);
       }
@@ -985,7 +1003,8 @@ export default function Home() {
   const handleClipModeChange = (
     videoId: string,
     clipMode: ClipMode,
-    script: ScriptResult
+    script: ScriptResult,
+    selectedHook: number | null
   ) => {
     setScripts((prev) => ({
       ...prev,
@@ -995,7 +1014,7 @@ export default function Home() {
       },
     }));
 
-    const queries = getFootageQueries(script, clipMode);
+    const queries = getFootageQueries(script, clipMode, selectedHook);
     if (queries.length) {
       void loadFootageForVideo(videoId, queries);
     }
@@ -1586,7 +1605,8 @@ export default function Home() {
                                 handleClipModeChange(
                                   video.videoId,
                                   mode,
-                                  panel.data!
+                                  panel.data!,
+                                  panel.selectedHook
                                 )
                               }
                               options={[
@@ -1652,7 +1672,6 @@ export default function Home() {
                                       )}
                                       <FootageQueryInput
                                         key={`${video.videoId}-${queryIndex}-${group.originalQuery}`}
-                                        defaultQuery={group.query}
                                         disabled={group.loading}
                                         onBlurCommit={(value) =>
                                           commitFootageQuery(
