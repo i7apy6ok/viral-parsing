@@ -240,6 +240,67 @@ function parseRussianTranslation(query: string): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
+const TRANSLATION_STYLE = { color: "#888", fontStyle: "italic" as const };
+
+function splitTextWithTranslation(text: string): {
+  main: string;
+  translation: string | null;
+} {
+  const translation = parseRussianTranslation(text);
+  if (!translation) {
+    return { main: text.trim(), translation: null };
+  }
+  return {
+    main: toPexelsSearchQuery(text),
+    translation,
+  };
+}
+
+function ScriptTextWithTranslation({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
+  const { main, translation } = splitTextWithTranslation(text);
+
+  return (
+    <span className={className}>
+      {main}
+      {translation && (
+        <>
+          {" "}
+          <span style={TRANSLATION_STYLE}>({translation})</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+function ScriptHookText({
+  hook,
+  language,
+}: {
+  hook: string;
+  language: ScriptLanguage;
+}) {
+  const { main, translation } = splitTextWithTranslation(hook);
+
+  return (
+    <>
+      <p className="mt-1 leading-snug text-zinc-200">
+        {language === "ru" ? hook : main}
+      </p>
+      {language !== "ru" && translation && (
+        <p className="mt-0.5 text-xs leading-snug" style={TRANSLATION_STYLE}>
+          {translation}
+        </p>
+      )}
+    </>
+  );
+}
+
 function toPexelsSearchQuery(query: string): string {
   const trimmed = query.trim();
   const withoutTranslation = trimmed.replace(/\s*\([^)]+\)\s*$/, "").trim();
@@ -313,41 +374,47 @@ function createManualSlot(initialQuery: string): ManualSlot {
 
 function buildManualGroups(
   script: ScriptResult,
-  language: ScriptLanguage
+  language: ScriptLanguage,
+  selectedHook: number | null
 ): ManualGroup[] {
   const sentences = script.sentences
     .map((sentence) => sentence.trim())
     .filter(Boolean);
 
-  return sentences.map((originalText, index) => {
+  const sentenceGroups: ManualGroup[] = sentences.map((sentenceText, index) => {
+    const { main, translation } = splitTextWithTranslation(sentenceText);
     const initialQuery = (
       script.videoQueries[index] ??
       script.videoQueries[0] ??
       ""
     ).trim();
-    const translation =
-      language !== "ru"
-        ? (parseRussianTranslation(originalText) ?? "")
-        : "";
 
     return {
-      originalText,
-      translation,
+      originalText: main,
+      translation: language !== "ru" && translation ? translation : "",
       slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
         createManualSlot(initialQuery)
       ),
     };
   });
-}
 
-function getManualGroupHeadline(
-  group: ManualGroup,
-  language: ScriptLanguage
-): string {
-  if (language === "ru") {
-    return group.originalText;
+  const hookIndex = getSelectedHookIndex(selectedHook);
+  const rawHook = (script.hooks[hookIndex] ?? script.hooks[0] ?? "").trim();
+  if (!rawHook) {
+    return sentenceGroups;
   }
-  return toPexelsSearchQuery(group.originalText);
+
+  const hookTranslation = parseRussianTranslation(rawHook);
+  const hookGroup: ManualGroup = {
+    originalText: stripTranslation(rawHook),
+    translation:
+      language !== "ru" && hookTranslation ? hookTranslation : "",
+    slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
+      createManualSlot((script.videoQueries[0] ?? "").trim())
+    ),
+  };
+
+  return [hookGroup, ...sentenceGroups];
 }
 
 function getManualSlotCalculatedDurations(
@@ -575,11 +642,25 @@ function ManualFootageSlot({
         <p className="text-[10px] text-zinc-500">Видео не найдены</p>
       ) : (
         <div className="space-y-1.5">
-          <img
-            src={activeVideo.preview}
-            alt=""
-            loading="lazy"
-            className="aspect-[9/16] w-full rounded-lg border border-zinc-700 object-cover"
+          <video
+            src={proxyUrl(activeVideo.url)}
+            poster={activeVideo.preview}
+            muted
+            loop
+            playsInline
+            onMouseEnter={(e) => {
+              void e.currentTarget.play().catch(() => {});
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.pause();
+              e.currentTarget.currentTime = 0;
+            }}
+            style={{
+              width: "100%",
+              borderRadius: "8px",
+              cursor: "pointer",
+            }}
+            className="aspect-[9/16] object-cover"
           />
           {calculatedDuration != null && (
             <ManualSlotDurationInput
@@ -648,10 +729,13 @@ function ManualFootageSection({
         <div key={`${group.originalText}-${groupIndex}`} className="space-y-2">
           <div className="space-y-1">
             <p className="text-xs font-bold leading-snug text-zinc-100">
-              {getManualGroupHeadline(group, language)}
+              {group.originalText}
             </p>
-            {group.translation && (
-              <p className="text-xs italic leading-snug text-zinc-500">
+            {language !== "ru" && group.translation && (
+              <p
+                className="text-xs leading-snug"
+                style={TRANSLATION_STYLE}
+              >
                 {group.translation}
               </p>
             )}
@@ -1107,9 +1191,10 @@ export default function Home() {
   const loadManualFootageForVideo = async (
     videoId: string,
     script: ScriptResult,
+    selectedHook: number | null,
     language: ScriptLanguage
   ) => {
-    const groups = buildManualGroups(script, language);
+    const groups = buildManualGroups(script, language, selectedHook);
     const searchQueries = groups.map((group) =>
       toPexelsSearchQuery(group.slots[0]?.query.trim() ?? "")
     );
@@ -1596,7 +1681,12 @@ export default function Home() {
           manualGroups: [],
         },
       }));
-      void loadManualFootageForVideo(videoId, script, language);
+      void loadManualFootageForVideo(
+        videoId,
+        script,
+        selectedHook,
+        language
+      );
       return;
     }
 
@@ -2136,7 +2226,10 @@ export default function Home() {
                                     : `${panel.selectedHook === i ? "✓ " : ""}Хук ${i + 1}`}
                                 </span>
                                 {panel.copiedHook !== i && (
-                                  <p className="mt-1 leading-snug">{hook}</p>
+                                  <ScriptHookText
+                                    hook={hook}
+                                    language={panel.language ?? "ru"}
+                                  />
                                 )}
                               </button>
                             ))}
@@ -2148,7 +2241,7 @@ export default function Home() {
                             Основная часть
                           </h3>
                           <p className="whitespace-pre-wrap leading-relaxed text-zinc-300">
-                            {panel.data.body}
+                            <ScriptTextWithTranslation text={panel.data.body} />
                           </p>
                         </div>
 
@@ -2157,7 +2250,7 @@ export default function Home() {
                             CTA
                           </h3>
                           <p className="leading-relaxed text-zinc-300">
-                            {panel.data.cta}
+                            <ScriptTextWithTranslation text={panel.data.cta} />
                           </p>
                         </div>
 
@@ -2166,7 +2259,9 @@ export default function Home() {
                             Визуальный хук
                           </h3>
                           <p className="leading-relaxed text-zinc-300">
-                            {panel.data.visualHook}
+                            <ScriptTextWithTranslation
+                              text={panel.data.visualHook}
+                            />
                           </p>
                         </div>
 
@@ -2362,20 +2457,9 @@ export default function Home() {
                                     Boolean(rawHook.trim()) &&
                                     stripTranslation(rawHook) ===
                                       group.originalQuery.trim();
-                                  const translationSource = isHookBlock
+                                  const displayText = isHookBlock
                                     ? rawHook
                                     : group.originalQuery;
-
-                                  const russianTranslation =
-                                    panel.language !== "ru"
-                                      ? parseRussianTranslation(
-                                          translationSource
-                                        )
-                                      : null;
-                                  const scriptLine =
-                                    panel.language !== "ru"
-                                      ? toPexelsSearchQuery(translationSource)
-                                      : group.originalQuery;
 
                                   return (
                                   <div
@@ -2383,13 +2467,10 @@ export default function Home() {
                                   >
                                     <div className="mb-2 space-y-1">
                                       <p className="text-xs leading-snug text-zinc-300">
-                                        {scriptLine}
+                                        <ScriptTextWithTranslation
+                                          text={displayText}
+                                        />
                                       </p>
-                                      {russianTranslation && (
-                                        <p className="text-xs italic leading-snug text-zinc-500">
-                                          {russianTranslation}
-                                        </p>
-                                      )}
                                       <FootageQueryInput
                                         key={`${video.videoId}-${queryIndex}-${group.originalQuery}`}
                                         disabled={group.loading}
