@@ -275,9 +275,7 @@ function getFootageQueries(
   selectedHook: number | null
 ): string[] {
   const hookIndex = getSelectedHookIndex(selectedHook);
-  const hook = stripTranslation(
-    script.hooks[hookIndex] ?? script.hooks[0] ?? ""
-  ).trim();
+  const hook = (script.hooks[hookIndex] ?? script.hooks[0] ?? "").trim();
 
   const rest =
     clipMode === "sentences"
@@ -1646,15 +1644,31 @@ export default function Home() {
                                         ]
                                       : null;
 
+                                  const hookIndex = getSelectedHookIndex(
+                                    panel.selectedHook
+                                  );
+                                  const rawHook =
+                                    panel.data?.hooks[hookIndex] ??
+                                    panel.data?.hooks[0] ??
+                                    "";
+                                  const isHookBlock =
+                                    queryIndex === 0 &&
+                                    Boolean(rawHook.trim()) &&
+                                    stripTranslation(rawHook) ===
+                                      group.originalQuery.trim();
+                                  const translationSource = isHookBlock
+                                    ? rawHook
+                                    : group.originalQuery;
+
                                   const russianTranslation =
                                     panel.language !== "ru"
                                       ? parseRussianTranslation(
-                                          group.originalQuery
+                                          translationSource
                                         )
                                       : null;
                                   const scriptLine =
                                     panel.language !== "ru"
-                                      ? toPexelsSearchQuery(group.originalQuery)
+                                      ? toPexelsSearchQuery(translationSource)
                                       : group.originalQuery;
 
                                   return (
