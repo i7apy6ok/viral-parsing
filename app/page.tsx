@@ -444,12 +444,13 @@ function buildManualGroups(
   }
 
   const hookTranslation = parseRussianTranslation(rawHook);
+  const hookQuery = stripTranslation(rawHook).trim();
   const hookGroup: ManualGroup = {
-    originalText: stripTranslation(rawHook),
+    originalText: hookQuery,
     translation:
       language !== "ru" && hookTranslation ? hookTranslation : "",
     slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
-      createManualSlot((script.videoQueries[0] ?? "").trim())
+      createManualSlot(hookQuery)
     ),
     slotDurations: null,
   };
