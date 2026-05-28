@@ -651,14 +651,12 @@ function ManualSlotDurationInput({
 
 function ManualFootageQueryInput({
   inputRef,
-  syncedQuery,
   loading,
   searchError,
   onBlurCommit,
   onSearch,
 }: {
   inputRef: (element: HTMLInputElement | null) => void;
-  syncedQuery: string;
   loading: boolean;
   searchError: string | null;
   onBlurCommit: (value: string) => void;
@@ -670,16 +668,6 @@ function ManualFootageQueryInput({
     localRef.current = element;
     inputRef(element);
   };
-
-  useEffect(() => {
-    if (
-      localRef.current &&
-      document.activeElement !== localRef.current &&
-      localRef.current.value !== syncedQuery
-    ) {
-      localRef.current.value = syncedQuery;
-    }
-  }, [syncedQuery]);
 
   const runSearch = () => {
     const value = localRef.current?.value.trim() ?? "";
@@ -745,7 +733,6 @@ function ManualFootageSlot({
     <div className="min-w-0 flex-[0_0_30%] space-y-2">
       <ManualFootageQueryInput
         inputRef={inputRef}
-        syncedQuery={slot.query}
         loading={slot.loading}
         searchError={slot.searchError}
         onBlurCommit={onBlurCommit}
