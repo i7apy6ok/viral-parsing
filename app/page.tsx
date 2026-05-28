@@ -26,8 +26,9 @@ type ManualSlot = {
   customDuration: number | null;
 };
 
-type ManualSlotGroup = {
+type ManualGroup = {
   originalText: string;
+  translation: string;
   slots: ManualSlot[];
 };
 
@@ -57,7 +58,7 @@ type ScriptPanelState = {
   footageLoading: boolean;
   footageError: string | null;
   footageGroups: FootageGroup[];
-  manualGroups: ManualSlotGroup[];
+  manualGroups: ManualGroup[];
   customFootageQuery: string;
   language: ScriptLanguage;
   clipMode: ClipMode;
@@ -65,21 +66,19 @@ type ScriptPanelState = {
   mergeStatus: string | null;
   mergeError: string | null;
   openFootageIndex: number | null;
-  openManualSlot: { groupIndex: number; slotIndex: number } | null;
 };
 
 const FOOTAGE_DEFAULTS = {
   footageLoading: false,
   footageError: null,
   footageGroups: [] as FootageGroup[],
-  manualGroups: [] as ManualSlotGroup[],
+  manualGroups: [] as ManualGroup[],
   customFootageQuery: "",
   clipMode: "sentences" as const,
   mergeLoading: false,
   mergeStatus: null,
   mergeError: null,
   openFootageIndex: null,
-  openManualSlot: null,
 };
 
 const RAILWAY_MERGE_URL =
@@ -302,9 +301,9 @@ function getFootageQueries(
   return hook ? [hook, ...rest] : rest;
 }
 
-function createEmptyManualSlot(): ManualSlot {
+function createManualSlot(initialQuery: string): ManualSlot {
   return {
-    query: "",
+    query: initialQuery,
     videos: [],
     loading: false,
     selectedIndex: 0,
@@ -312,21 +311,47 @@ function createEmptyManualSlot(): ManualSlot {
   };
 }
 
-function buildManualGroups(script: ScriptResult): ManualSlotGroup[] {
-  return script.sentences
+function buildManualGroups(
+  script: ScriptResult,
+  language: ScriptLanguage
+): ManualGroup[] {
+  const sentences = script.sentences
     .map((sentence) => sentence.trim())
-    .filter(Boolean)
-    .map((originalText) => ({
+    .filter(Boolean);
+
+  return sentences.map((originalText, index) => {
+    const initialQuery = (
+      script.videoQueries[index] ??
+      script.videoQueries[0] ??
+      ""
+    ).trim();
+    const translation =
+      language !== "ru"
+        ? (parseRussianTranslation(originalText) ?? "")
+        : "";
+
+    return {
       originalText,
-      slots: Array.from(
-        { length: MANUAL_SLOTS_PER_SENTENCE },
-        createEmptyManualSlot
+      translation,
+      slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
+        createManualSlot(initialQuery)
       ),
-    }));
+    };
+  });
+}
+
+function getManualGroupHeadline(
+  group: ManualGroup,
+  language: ScriptLanguage
+): string {
+  if (language === "ru") {
+    return group.originalText;
+  }
+  return toPexelsSearchQuery(group.originalText);
 }
 
 function getManualSlotCalculatedDurations(
-  groups: ManualSlotGroup[],
+  groups: ManualGroup[],
   audioDuration: number,
   language: ScriptLanguage
 ): number[][] {
@@ -356,37 +381,45 @@ function getManualSlotEffectiveDuration(
   return slot.customDuration ?? calculated;
 }
 
-function getAllManualClipsForMerge(
-  groups: ManualSlotGroup[]
-): { clips: SearchVideoResult[]; missing: boolean } {
-  const clips: SearchVideoResult[] = [];
+function isManualSlotIncludedInMerge(
+  slot: ManualSlot,
+  calculated: number
+): boolean {
+  if (slot.loading || slot.videos.length === 0) {
+    return false;
+  }
+  return getManualSlotEffectiveDuration(slot, calculated) !== 0;
+}
 
-  for (const group of groups) {
-    for (const slot of group.slots) {
-      if (slot.loading || slot.videos.length === 0) {
-        return { clips: [], missing: true };
+function collectManualMergePayload(
+  groups: ManualGroup[],
+  calculated: number[][]
+): { clips: SearchVideoResult[]; durations: number[] } {
+  const clips: SearchVideoResult[] = [];
+  const durations: number[] = [];
+
+  groups.forEach((group, groupIndex) => {
+    group.slots.forEach((slot, slotIndex) => {
+      const slotCalculated = calculated[groupIndex]?.[slotIndex] ?? 0;
+      if (!isManualSlotIncludedInMerge(slot, slotCalculated)) {
+        return;
       }
+
       clips.push(
         slot.videos[slot.selectedIndex % slot.videos.length]
       );
-    }
-  }
+      durations.push(getManualSlotEffectiveDuration(slot, slotCalculated));
+    });
+  });
 
-  return { clips, missing: false };
+  return { clips, durations };
 }
 
-function countFilledManualSlots(groups: ManualSlotGroup[]): number {
-  return groups.reduce(
-    (count, group) =>
-      count +
-      group.slots.filter((slot) => !slot.loading && slot.videos.length > 0)
-        .length,
-    0
-  );
-}
-
-function countTotalManualSlots(groups: ManualSlotGroup[]): number {
-  return groups.reduce((count, group) => count + group.slots.length, 0);
+function hasManualMergeClips(
+  groups: ManualGroup[],
+  calculated: number[][]
+): boolean {
+  return collectManualMergePayload(groups, calculated).clips.length > 0;
 }
 
 function estimateSegmentDurations(
@@ -479,27 +512,174 @@ function ManualSlotDurationInput({
 }: {
   calculatedDuration: number;
   customDuration: number | null;
-  onChange: (value: number | null) => void;
+  onChange: (value: number) => void;
 }) {
   const displayValue = customDuration ?? calculatedDuration;
 
   return (
-    <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+    <label className="flex cursor-pointer items-center gap-1 text-xs">
       <input
         type="number"
+        min={0}
         step={0.1}
-        min={0.1}
         value={displayValue}
         onChange={(e) => {
           const parsed = Number.parseFloat(e.target.value);
-          if (Number.isFinite(parsed) && parsed > 0) {
+          if (Number.isFinite(parsed) && parsed >= 0) {
             onChange(Math.round(parsed * 10) / 10);
           }
         }}
-        className="w-16 rounded border border-green-800/60 bg-zinc-900 px-1.5 py-0.5 text-green-400 outline-none focus:border-green-600"
+        style={{ width: "60px" }}
+        className="rounded border border-green-800/60 bg-zinc-900 px-1.5 py-0.5 text-green-400 outline-none focus:border-green-600"
       />
       <span className="text-green-400">сек</span>
     </label>
+  );
+}
+
+function ManualFootageSlot({
+  slot,
+  calculatedDuration,
+  disabled,
+  onBlurCommit,
+  onSearch,
+  onDurationChange,
+  onCycleVideo,
+}: {
+  slot: ManualSlot;
+  calculatedDuration: number | null;
+  disabled: boolean;
+  onBlurCommit: (value: string) => void;
+  onSearch: (value: string) => void;
+  onDurationChange: (value: number) => void;
+  onCycleVideo: () => void;
+}) {
+  const activeVideo =
+    slot.videos.length > 0
+      ? slot.videos[slot.selectedIndex % slot.videos.length]
+      : null;
+
+  return (
+    <div className="min-w-0 flex-[0_0_30%] space-y-2">
+      <FootageQueryInput
+        disabled={disabled}
+        onBlurCommit={onBlurCommit}
+        onSearch={onSearch}
+      />
+
+      {slot.loading ? (
+        <div className="flex justify-center py-6">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+        </div>
+      ) : !activeVideo ? (
+        <p className="text-[10px] text-zinc-500">Видео не найдены</p>
+      ) : (
+        <div className="space-y-1.5">
+          <img
+            src={activeVideo.preview}
+            alt=""
+            loading="lazy"
+            className="aspect-[9/16] w-full rounded-lg border border-zinc-700 object-cover"
+          />
+          {calculatedDuration != null && (
+            <ManualSlotDurationInput
+              calculatedDuration={calculatedDuration}
+              customDuration={slot.customDuration}
+              onChange={onDurationChange}
+            />
+          )}
+          {slot.videos.length > 1 && (
+            <button
+              type="button"
+              onClick={onCycleVideo}
+              className="w-full rounded-md border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+            >
+              Другой
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ManualFootageSection({
+  panel,
+  onBlurCommit,
+  onSearch,
+  onDurationChange,
+  onCycleVideo,
+}: {
+  panel: ScriptPanelState;
+  onBlurCommit: (
+    groupIndex: number,
+    slotIndex: number,
+    value: string
+  ) => void;
+  onSearch: (
+    groupIndex: number,
+    slotIndex: number,
+    value: string
+  ) => void;
+  onDurationChange: (
+    groupIndex: number,
+    slotIndex: number,
+    value: number
+  ) => void;
+  onCycleVideo: (groupIndex: number, slotIndex: number) => void;
+}) {
+  const language = panel.language ?? "ru";
+  const manualCalculated =
+    panel.audioDuration != null
+      ? getManualSlotCalculatedDurations(
+          panel.manualGroups,
+          panel.audioDuration,
+          language
+        )
+      : null;
+
+  if (panel.manualGroups.length === 0) {
+    return <p className="text-xs text-zinc-500">Нет предложений в сценарии</p>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {panel.manualGroups.map((group, groupIndex) => (
+        <div key={`${group.originalText}-${groupIndex}`} className="space-y-2">
+          <div className="space-y-1">
+            <p className="text-xs font-bold leading-snug text-zinc-100">
+              {getManualGroupHeadline(group, language)}
+            </p>
+            {group.translation && (
+              <p className="text-xs italic leading-snug text-zinc-500">
+                {group.translation}
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-row gap-2">
+            {group.slots.map((slot, slotIndex) => (
+              <ManualFootageSlot
+                key={`${groupIndex}-${slotIndex}`}
+                slot={slot}
+                calculatedDuration={
+                  manualCalculated?.[groupIndex]?.[slotIndex] ?? null
+                }
+                disabled={slot.loading}
+                onBlurCommit={(value) =>
+                  onBlurCommit(groupIndex, slotIndex, value)
+                }
+                onSearch={(value) => onSearch(groupIndex, slotIndex, value)}
+                onDurationChange={(value) =>
+                  onDurationChange(groupIndex, slotIndex, value)
+                }
+                onCycleVideo={() => onCycleVideo(groupIndex, slotIndex)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -924,9 +1104,93 @@ export default function Home() {
     }));
   };
 
+  const loadManualFootageForVideo = async (
+    videoId: string,
+    script: ScriptResult,
+    language: ScriptLanguage
+  ) => {
+    const groups = buildManualGroups(script, language);
+    const searchQueries = groups.map((group) =>
+      toPexelsSearchQuery(group.slots[0]?.query.trim() ?? "")
+    );
+    const queriesToSend = searchQueries.filter(Boolean);
+
+    if (queriesToSend.length === 0) {
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          manualGroups: groups,
+          footageLoading: false,
+          footageError: null,
+        },
+      }));
+      return;
+    }
+
+    setScripts((prev) => ({
+      ...prev,
+      [videoId]: {
+        ...prev[videoId],
+        footageLoading: true,
+        footageError: null,
+        manualGroups: groups.map((group) => ({
+          ...group,
+          slots: group.slots.map((slot) => ({
+            ...slot,
+            loading: Boolean(toPexelsSearchQuery(slot.query.trim())),
+          })),
+        })),
+      },
+    }));
+
+    try {
+      const results = await searchFootageVideos(queriesToSend);
+
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          footageLoading: false,
+          footageError: null,
+          manualGroups: groups.map((group, groupIndex) => {
+            const searchQuery = searchQueries[groupIndex];
+            const videos = searchQuery
+              ? results.filter((video) => video.query === searchQuery)
+              : [];
+
+            return {
+              ...group,
+              slots: group.slots.map((slot) => ({
+                ...slot,
+                videos,
+                loading: false,
+                selectedIndex: 0,
+              })),
+            };
+          }),
+        },
+      }));
+    } catch (err) {
+      setScripts((prev) => ({
+        ...prev,
+        [videoId]: {
+          ...prev[videoId],
+          footageLoading: false,
+          footageError:
+            err instanceof Error ? err.message : "Ошибка поиска видео",
+          manualGroups: groups.map((group) => ({
+            ...group,
+            slots: group.slots.map((slot) => ({ ...slot, loading: false })),
+          })),
+        },
+      }));
+    }
+  };
+
   const updateManualGroups = (
     videoId: string,
-    updater: (groups: ManualSlotGroup[]) => ManualSlotGroup[]
+    updater: (groups: ManualGroup[]) => ManualGroup[]
   ) => {
     setScripts((prev) => ({
       ...prev,
@@ -961,7 +1225,7 @@ export default function Home() {
     videoId: string,
     groupIndex: number,
     slotIndex: number,
-    customDuration: number | null
+    customDuration: number
   ) => {
     updateManualGroups(videoId, (groups) =>
       groups.map((group, gi) =>
@@ -1317,7 +1581,8 @@ export default function Home() {
     videoId: string,
     clipMode: ClipMode,
     script: ScriptResult,
-    selectedHook: number | null
+    selectedHook: number | null,
+    language: ScriptLanguage
   ) => {
     if (clipMode === "manual") {
       setScripts((prev) => ({
@@ -1325,14 +1590,13 @@ export default function Home() {
         [videoId]: {
           ...prev[videoId],
           clipMode: "manual",
-          footageLoading: false,
           footageError: null,
           footageGroups: [],
           openFootageIndex: null,
-          manualGroups: buildManualGroups(script),
-          openManualSlot: null,
+          manualGroups: [],
         },
       }));
+      void loadManualFootageForVideo(videoId, script, language);
       return;
     }
 
@@ -1342,7 +1606,6 @@ export default function Home() {
         ...prev[videoId],
         clipMode: "sentences",
         manualGroups: [],
-        openManualSlot: null,
       },
     }));
 
@@ -1372,28 +1635,30 @@ export default function Home() {
     let durations: number[];
 
     if (isManual) {
-      const { clips, missing } = getAllManualClipsForMerge(panel.manualGroups);
-      if (missing || clips.length === 0) {
+      const calculated =
+        manualCalculated ??
+        getManualSlotCalculatedDurations(
+          panel.manualGroups,
+          panel.audioDuration ?? 0,
+          panel.language ?? "ru"
+        );
+      const payload = collectManualMergePayload(panel.manualGroups, calculated);
+
+      if (payload.clips.length === 0) {
         setScripts((prev) => ({
           ...prev,
           [videoId]: {
             ...prev[videoId],
-            mergeError: "Заполните все слоты видео (3 на каждое предложение)",
+            mergeError:
+              "Добавьте видео в слоты с длительностью больше 0 сек",
             mergeStatus: null,
           },
         }));
         return;
       }
 
-      selectedClips = clips;
-      durations = panel.manualGroups.flatMap((group, gi) =>
-        group.slots.map((slot, si) =>
-          getManualSlotEffectiveDuration(
-            slot,
-            manualCalculated?.[gi]?.[si] ?? 0
-          )
-        )
-      );
+      selectedClips = payload.clips;
+      durations = payload.durations;
     } else {
       selectedClips = getSelectedFootageClips(panel.footageGroups);
       if (selectedClips.length === 0) {
@@ -1979,7 +2244,8 @@ export default function Home() {
                                   video.videoId,
                                   mode,
                                   panel.data!,
-                                  panel.selectedHook
+                                  panel.selectedHook,
+                                  panel.language ?? "ru"
                                 )
                               }
                               options={[
@@ -1995,237 +2261,66 @@ export default function Home() {
 
                               {panel.clipMode === "manual" ? (
                                 <>
+                                  {panel.footageLoading &&
+                                    panel.manualGroups.length === 0 && (
+                                      <div className="mb-3 flex items-center gap-2 py-2">
+                                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                                        <span className="text-xs text-zinc-400">
+                                          Ищем видео на Pexels…
+                                        </span>
+                                      </div>
+                                    )}
+
                                   {panel.footageError && (
                                     <p className="mb-3 text-xs text-red-400">
                                       {panel.footageError}
                                     </p>
                                   )}
 
-                                  {panel.manualGroups.length === 0 ? (
-                                    <p className="text-xs text-zinc-500">
-                                      Нет предложений в сценарии
-                                    </p>
-                                  ) : (
-                                    <div className="space-y-6">
-                                      {(() => {
-                                        const manualCalculated =
-                                          panel.audioDuration != null
-                                            ? getManualSlotCalculatedDurations(
-                                                panel.manualGroups,
-                                                panel.audioDuration,
-                                                panel.language ?? "ru"
-                                              )
-                                            : null;
-
-                                        return panel.manualGroups.map(
-                                          (group, groupIndex) => {
-                                            const russianTranslation =
-                                              panel.language !== "ru"
-                                                ? parseRussianTranslation(
-                                                    group.originalText
-                                                  )
-                                                : null;
-                                            const scriptLine =
-                                              panel.language !== "ru"
-                                                ? toPexelsSearchQuery(
-                                                    group.originalText
-                                                  )
-                                                : group.originalText;
-
-                                            return (
-                                              <div
-                                                key={`${group.originalText}-${groupIndex}`}
-                                                className="space-y-3"
-                                              >
-                                                <div className="space-y-1">
-                                                  <p className="text-xs leading-snug text-zinc-300">
-                                                    {scriptLine}
-                                                  </p>
-                                                  {russianTranslation && (
-                                                    <p className="text-xs italic leading-snug text-zinc-500">
-                                                      {russianTranslation}
-                                                    </p>
-                                                  )}
-                                                </div>
-
-                                                {group.slots.map(
-                                                  (slot, slotIndex) => {
-                                                    const activeVideo =
-                                                      slot.videos.length > 0
-                                                        ? slot.videos[
-                                                            slot.selectedIndex %
-                                                              slot.videos
-                                                                .length
-                                                          ]
-                                                        : null;
-                                                    const calculatedDuration =
-                                                      manualCalculated?.[
-                                                        groupIndex
-                                                      ]?.[slotIndex] ?? null;
-                                                    const isOpen =
-                                                      panel.openManualSlot
-                                                        ?.groupIndex ===
-                                                        groupIndex &&
-                                                      panel.openManualSlot
-                                                        ?.slotIndex ===
-                                                        slotIndex;
-
-                                                    return (
-                                                      <div
-                                                        key={`${groupIndex}-${slotIndex}`}
-                                                        className="rounded-lg border border-zinc-800/80 bg-zinc-900/30 p-3"
-                                                      >
-                                                        <FootageQueryInput
-                                                          key={`${video.videoId}-manual-${groupIndex}-${slotIndex}`}
-                                                          disabled={
-                                                            slot.loading
-                                                          }
-                                                          onBlurCommit={(
-                                                            value
-                                                          ) =>
-                                                            commitManualSlotQuery(
-                                                              video.videoId,
-                                                              groupIndex,
-                                                              slotIndex,
-                                                              value
-                                                            )
-                                                          }
-                                                          onSearch={(value) => {
-                                                            commitManualSlotQuery(
-                                                              video.videoId,
-                                                              groupIndex,
-                                                              slotIndex,
-                                                              value
-                                                            );
-                                                            void handleSearchManualSlot(
-                                                              video.videoId,
-                                                              groupIndex,
-                                                              slotIndex,
-                                                              value
-                                                            );
-                                                          }}
-                                                        />
-
-                                                        {slot.loading ? (
-                                                          <div className="flex justify-center py-4">
-                                                            <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                                                          </div>
-                                                        ) : !activeVideo ? (
-                                                          <p className="mt-2 text-xs text-zinc-500">
-                                                            Видео не найдены
-                                                          </p>
-                                                        ) : isOpen ? (
-                                                          <div className="mt-2 space-y-2">
-                                                            <LazyFootageVideo
-                                                              videoUrl={
-                                                                activeVideo.url
-                                                              }
-                                                              poster={
-                                                                activeVideo.preview
-                                                              }
-                                                            />
-                                                            {calculatedDuration !=
-                                                              null && (
-                                                              <ManualSlotDurationInput
-                                                                calculatedDuration={
-                                                                  calculatedDuration
-                                                                }
-                                                                customDuration={
-                                                                  slot.customDuration
-                                                                }
-                                                                onChange={(
-                                                                  value
-                                                                ) =>
-                                                                  setManualSlotCustomDuration(
-                                                                    video.videoId,
-                                                                    groupIndex,
-                                                                    slotIndex,
-                                                                    value
-                                                                  )
-                                                                }
-                                                              />
-                                                            )}
-                                                            {slot.videos
-                                                              .length > 1 && (
-                                                              <button
-                                                                type="button"
-                                                                onClick={() =>
-                                                                  handleCycleManualSlotVideo(
-                                                                    video.videoId,
-                                                                    groupIndex,
-                                                                    slotIndex
-                                                                  )
-                                                                }
-                                                                className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
-                                                              >
-                                                                Подобрать другой
-                                                                фрагмент
-                                                              </button>
-                                                            )}
-                                                          </div>
-                                                        ) : (
-                                                          <div className="mt-2 space-y-2">
-                                                            <img
-                                                              src={
-                                                                activeVideo.preview
-                                                              }
-                                                              alt=""
-                                                              loading="lazy"
-                                                              onClick={() =>
-                                                                setScripts(
-                                                                  (prev) => ({
-                                                                    ...prev,
-                                                                    [video.videoId]:
-                                                                      {
-                                                                        ...prev[
-                                                                          video
-                                                                            .videoId
-                                                                        ],
-                                                                        openManualSlot:
-                                                                          {
-                                                                            groupIndex,
-                                                                            slotIndex,
-                                                                          },
-                                                                      },
-                                                                  })
-                                                                )
-                                                              }
-                                                              className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-zinc-700 object-cover opacity-60 transition-opacity hover:opacity-100"
-                                                            />
-                                                            {calculatedDuration !=
-                                                              null && (
-                                                              <ManualSlotDurationInput
-                                                                calculatedDuration={
-                                                                  calculatedDuration
-                                                                }
-                                                                customDuration={
-                                                                  slot.customDuration
-                                                                }
-                                                                onChange={(
-                                                                  value
-                                                                ) =>
-                                                                  setManualSlotCustomDuration(
-                                                                    video.videoId,
-                                                                    groupIndex,
-                                                                    slotIndex,
-                                                                    value
-                                                                  )
-                                                                }
-                                                              />
-                                                            )}
-                                                          </div>
-                                                        )}
-                                                      </div>
-                                                    );
-                                                  }
-                                                )}
-                                              </div>
-                                            );
-                                          }
-                                        );
-                                      })()}
-                                    </div>
-                                  )}
+                                  <ManualFootageSection
+                                    panel={panel}
+                                    onBlurCommit={(groupIndex, slotIndex, value) =>
+                                      commitManualSlotQuery(
+                                        video.videoId,
+                                        groupIndex,
+                                        slotIndex,
+                                        value
+                                      )
+                                    }
+                                    onSearch={(groupIndex, slotIndex, value) => {
+                                      commitManualSlotQuery(
+                                        video.videoId,
+                                        groupIndex,
+                                        slotIndex,
+                                        value
+                                      );
+                                      void handleSearchManualSlot(
+                                        video.videoId,
+                                        groupIndex,
+                                        slotIndex,
+                                        value
+                                      );
+                                    }}
+                                    onDurationChange={(
+                                      groupIndex,
+                                      slotIndex,
+                                      value
+                                    ) =>
+                                      setManualSlotCustomDuration(
+                                        video.videoId,
+                                        groupIndex,
+                                        slotIndex,
+                                        value
+                                      )
+                                    }
+                                    onCycleVideo={(groupIndex, slotIndex) =>
+                                      handleCycleManualSlotVideo(
+                                        video.videoId,
+                                        groupIndex,
+                                        slotIndex
+                                      )
+                                    }
+                                  />
                                 </>
                               ) : (
                                 <>
@@ -2415,10 +2510,18 @@ export default function Home() {
                                 disabled={
                                   panel.mergeLoading ||
                                   (panel.clipMode === "manual"
-                                    ? countFilledManualSlots(
-                                        panel.manualGroups
-                                      ) !==
-                                      countTotalManualSlots(panel.manualGroups)
+                                    ? !hasManualMergeClips(
+                                        panel.manualGroups,
+                                        panel.audioDuration != null
+                                          ? getManualSlotCalculatedDurations(
+                                              panel.manualGroups,
+                                              panel.audioDuration,
+                                              panel.language ?? "ru"
+                                            )
+                                          : panel.manualGroups.map((group) =>
+                                              group.slots.map(() => 0)
+                                            )
+                                      )
                                     : panel.footageLoading ||
                                       getSelectedFootageClips(
                                         panel.footageGroups
