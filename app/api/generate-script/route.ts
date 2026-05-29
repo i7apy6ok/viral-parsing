@@ -257,7 +257,15 @@ async function generateWithClaude(
     });
     clearTimeout(timeoutId);
 
-    const data = await res.json();
+    const rawText = await res.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(
+        `OneProvider returned invalid JSON: ${rawText.slice(0, 200)}`
+      );
+    }
 
     if (!res.ok) {
       const err = new Error(claudeErrorMessage(res.status, data)) as ClaudeApiError;
@@ -265,7 +273,9 @@ async function generateWithClaude(
       throw err;
     }
 
-    const content = data.content?.[0]?.text;
+    const content = (
+      data as { content?: Array<{ text?: string }> }
+    ).content?.[0]?.text;
     if (typeof content !== "string") {
       throw new Error(
         `Empty response from Claude: ${JSON.stringify(data)}`
