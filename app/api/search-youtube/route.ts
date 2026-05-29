@@ -300,7 +300,7 @@ function buildSearchParams(
     q: buildSearchQuery(keyword, type),
     type: "video",
     maxResults: "50",
-    order: "relevance",
+    order: "viewCount",
     regionCode,
   };
 
