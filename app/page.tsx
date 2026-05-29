@@ -930,7 +930,7 @@ function ManualFootageSlot({
       : null;
 
   return (
-    <div className="min-w-0 flex-1 space-y-2" style={{ minWidth: "30%" }}>
+    <div className="space-y-2" style={{ flex: "1 1 0", minWidth: 0 }}>
       <ManualFootageQueryInput
         inputRef={inputRef}
         loading={slot.loading}
@@ -962,10 +962,11 @@ function ManualFootageSlot({
             }}
             style={{
               width: "100%",
+              aspectRatio: "9/16",
+              objectFit: "cover",
               borderRadius: "8px",
               cursor: "pointer",
             }}
-            className="aspect-[9/16] object-cover"
           />
           {calculatedDuration != null && (
             <ManualSlotDurationInput
@@ -1048,7 +1049,14 @@ function ManualFootageSection({
             </p>
           </div>
 
-          <div className="flex flex-row gap-2">
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "row",
+              gap: "8px",
+              width: "100%",
+            }}
+          >
             {group.slots.map((slot, slotIndex) => (
               <ManualFootageSlot
                 key={`${groupIndex}-${slotIndex}`}
