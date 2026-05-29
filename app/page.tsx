@@ -1194,7 +1194,11 @@ export default function Home() {
     {}
   );
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
+  const [focusedVideoId, setFocusedVideoId] = useState<string | null>(null);
   const manualSlotInputRefs = useRef<Record<string, HTMLInputElement | null>>(
+    {}
+  );
+  const manualSlotSearchAbortRefs = useRef<Record<string, AbortController>>(
     {}
   );
   const [visibleCount, setVisibleCount] = useState(4);
@@ -1209,6 +1213,7 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setOpenVideoId(null);
+    setFocusedVideoId(null);
     setVideos([]);
     setScripts({});
     setVisibleCount(4);
@@ -1275,6 +1280,12 @@ export default function Home() {
         ...FOOTAGE_DEFAULTS,
       },
     }));
+
+    setTimeout(() => {
+      document
+        .getElementById("script-panel")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
 
     const scriptLanguage = current?.language ?? "ru";
 
@@ -1731,8 +1742,18 @@ export default function Home() {
       [videoId]: { ...prev[videoId], footageError: null },
     }));
 
+    const slotKey = `${videoId}-${groupIndex}-${slotIndex}`;
+    const previousController = manualSlotSearchAbortRefs.current[slotKey];
+    if (previousController) {
+      previousController.abort();
+    }
+
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    manualSlotSearchAbortRefs.current[slotKey] = controller;
+    const isCurrentSearch = () =>
+      manualSlotSearchAbortRefs.current[slotKey] === controller;
+
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     try {
       const results = await searchFootageVideos(
@@ -1740,7 +1761,10 @@ export default function Home() {
         [page],
         controller.signal
       );
-      clearTimeout(timeout);
+      clearTimeout(timeoutId);
+      if (!isCurrentSearch()) {
+        return;
+      }
 
       updateManualGroups(videoId, (groups) =>
         groups.map((item, gi) => {
@@ -1770,7 +1794,11 @@ export default function Home() {
         })
       );
     } catch (err) {
-      clearTimeout(timeout);
+      clearTimeout(timeoutId);
+      if (!isCurrentSearch()) {
+        return;
+      }
+
       const isTimeout =
         err instanceof Error && err.name === "AbortError";
 
@@ -1795,6 +1823,10 @@ export default function Home() {
               }
         )
       );
+    } finally {
+      if (isCurrentSearch()) {
+        delete manualSlotSearchAbortRefs.current[slotKey];
+      }
     }
   };
 
@@ -3191,7 +3223,10 @@ export default function Home() {
                       : "grid grid-cols-1 gap-4 sm:grid-cols-2"
                   }
                 >
-            {videos.slice(0, visibleCount).map((video) => {
+            {(focusedVideoId
+              ? videos.filter((item) => item.videoId === focusedVideoId)
+              : videos.slice(0, visibleCount)
+            ).map((video) => {
               const panel = scripts[video.videoId];
               return (
               <article
@@ -3270,8 +3305,10 @@ export default function Home() {
                     onClick={() => {
                       if (openVideoId === video.videoId) {
                         setOpenVideoId(null);
+                        setFocusedVideoId(null);
                       } else {
                         setOpenVideoId(video.videoId);
+                        setFocusedVideoId(video.videoId);
                         void handleGenerateScript(video);
                       }
                     }}
@@ -3288,7 +3325,7 @@ export default function Home() {
             })}
               </div>
 
-              {videos.length > visibleCount && (
+              {!focusedVideoId && videos.length > visibleCount && (
                 <button
                   type="button"
                   onClick={() => setVisibleCount((prev) => prev + 4)}
@@ -3301,6 +3338,7 @@ export default function Home() {
 
               {openVideoId && activeVideo && (
                 <div
+                  id="script-panel"
                   className="min-w-0 flex-1"
                   style={{ width: hideVideoList ? "100%" : undefined }}
                 >
