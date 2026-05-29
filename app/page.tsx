@@ -42,6 +42,12 @@ type ManualGroup = {
   slotDurations: [number, number, number] | null;
 };
 
+type AudioSegment = {
+  start: number;
+  end: number;
+  text: string;
+};
+
 type ClipMode = "sentences" | "manual";
 
 const MANUAL_SLOTS_PER_SENTENCE = 3;
@@ -65,6 +71,7 @@ type ScriptPanelState = {
   voiceAudioUrl: string | null;
   voiceAudioBlob: Blob | null;
   audioDuration: number | null;
+  audioSegments: AudioSegment[] | null;
   footageLoading: boolean;
   footageError: string | null;
   footageGroups: FootageGroup[];
@@ -89,6 +96,7 @@ const FOOTAGE_DEFAULTS = {
   mergeStatus: null,
   mergeError: null,
   openFootageIndex: null,
+  audioSegments: null,
 };
 
 const RAILWAY_MERGE_URL =
@@ -618,10 +626,33 @@ function hasManualMergeClips(
 
 function estimateSegmentDurations(
   texts: string[],
-  totalAudioDuration: number
+  totalAudioDuration: number,
+  audioSegments: AudioSegment[] | null = null
 ): number[] {
   if (texts.length === 0) {
     return [];
+  }
+
+  if (audioSegments && audioSegments.length > 0) {
+    const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
+    const totalChars = charCounts.reduce((a, b) => a + b, 0);
+
+    return texts.map((_, index) => {
+      const segment = audioSegments[index];
+      if (segment) {
+        return Math.round((segment.end - segment.start) * 10) / 10;
+      }
+
+      if (totalChars === 0) {
+        return 0;
+      }
+
+      return (
+        Math.round(
+          (charCounts[index] / totalChars) * totalAudioDuration * 10
+        ) / 10
+      );
+    });
   }
 
   const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
@@ -1941,20 +1972,32 @@ export default function Home() {
         }),
       });
 
+      const data = (await res.json()) as {
+        error?: string;
+        audioBase64?: string;
+        segments?: AudioSegment[];
+      };
+
       if (!res.ok) {
-        let errorMessage = "Ошибка озвучки";
-        try {
-          const data = await res.json();
-          if (typeof data.error === "string") {
-            errorMessage = data.error;
-          }
-        } catch {
-          errorMessage = `Ошибка Voicer: ${res.status}`;
-        }
-        throw new Error(errorMessage);
+        throw new Error(
+          typeof data.error === "string" ? data.error : `Ошибка Voicer: ${res.status}`
+        );
       }
 
-      const blob = await res.blob();
+      if (!data.audioBase64) {
+        throw new Error("Озвучка не вернула аудио");
+      }
+
+      const binary = atob(data.audioBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: "audio/mpeg" });
+      const audioSegments =
+        Array.isArray(data.segments) && data.segments.length > 0
+          ? data.segments
+          : null;
       const audioUrl = URL.createObjectURL(blob);
 
       const audioContext = new AudioContext();
@@ -1985,6 +2028,7 @@ export default function Home() {
             voiceAudioUrl: audioUrl,
             voiceAudioBlob: blob,
             audioDuration,
+            audioSegments,
             manualGroups,
           },
         };
@@ -2161,7 +2205,11 @@ export default function Home() {
           .map((group) =>
             segmentTextForDuration(group.originalQuery, panel.language ?? "ru")
           );
-        durations = estimateSegmentDurations(footageTexts, audioDuration);
+        durations = estimateSegmentDurations(
+          footageTexts,
+          audioDuration,
+          panel.audioSegments
+        );
       }
 
       const clipUrls = selectedClips.map((clip) => clip.url);
@@ -2446,7 +2494,8 @@ export default function Home() {
                           panel.language ?? "ru"
                         )
                       ),
-                      panel.audioDuration
+                      panel.audioDuration,
+                      panel.audioSegments
                     )
                   : null;
               return (

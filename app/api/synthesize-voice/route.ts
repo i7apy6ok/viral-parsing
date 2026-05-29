@@ -14,6 +14,64 @@ type TaskStatusResponse = {
   status?: string;
 };
 
+export type AudioSegment = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+type GroqVerboseTranscription = {
+  segments?: Array<{
+    start?: number;
+    end?: number;
+    text?: string;
+  }>;
+};
+
+async function transcribeWithGroq(
+  audioBuffer: ArrayBuffer
+): Promise<AudioSegment[]> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    console.warn("GROQ_API_KEY is not configured, skipping Whisper");
+    return [];
+  }
+
+  const formData = new FormData();
+  formData.append(
+    "file",
+    new Blob([audioBuffer], { type: "audio/mpeg" }),
+    "audio.mp3"
+  );
+  formData.append("model", "whisper-large-v3");
+  formData.append("response_format", "verbose_json");
+  formData.append("timestamp_granularities[]", "segment");
+
+  const groqRes = await fetch(
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: formData,
+    }
+  );
+
+  if (!groqRes.ok) {
+    const errorText = await groqRes.text();
+    console.error("Groq Whisper error:", groqRes.status, errorText);
+    return [];
+  }
+
+  const groqData = (await groqRes.json()) as GroqVerboseTranscription;
+  return (groqData.segments ?? [])
+    .map((segment) => ({
+      start: Number(segment.start ?? 0),
+      end: Number(segment.end ?? 0),
+      text: String(segment.text ?? "").trim(),
+    }))
+    .filter((segment) => segment.end > segment.start);
+}
+
 const VOICER_BASE_URL = "https://voiceapi.csv666.ru";
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 const POLL_INTERVAL_MS = 2000;
@@ -172,10 +230,11 @@ export async function POST(request: Request) {
     }
 
     const audioBuffer = await resultRes.arrayBuffer();
+    const segments = await transcribeWithGroq(audioBuffer);
 
-    return new Response(audioBuffer, {
-      status: 200,
-      headers: { "Content-Type": "audio/mpeg" },
+    return NextResponse.json({
+      audioBase64: Buffer.from(audioBuffer).toString("base64"),
+      segments,
     });
   } catch (error) {
     if (error instanceof VoicerHttpError) {
