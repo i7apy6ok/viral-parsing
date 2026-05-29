@@ -437,12 +437,48 @@ function getFootageQueries(
 ): string[] {
   const hookIndex = getSelectedHookIndex(selectedHook);
   const hook = (script.hooks[hookIndex] ?? script.hooks[0] ?? "").trim();
-
-  const rest = script.sentences
+  const sentences = script.sentences
     .map((sentence) => sentence.trim())
     .filter(Boolean);
+  const cta = script.cta?.trim() ?? "";
 
-  return hook ? [hook, ...rest] : rest;
+  const queries: string[] = [];
+  if (hook) {
+    queries.push(hook);
+  }
+  queries.push(...sentences);
+  if (cta) {
+    queries.push(cta);
+  }
+  return queries;
+}
+
+function buildCtaManualGroup(
+  script: ScriptResult,
+  language: ScriptLanguage
+): ManualGroup | null {
+  const rawCta = script.cta?.trim() ?? "";
+  if (!rawCta) {
+    return null;
+  }
+
+  const ctaTranslation = parseRussianTranslation(rawCta);
+  const ctaQuery = stripTranslation(rawCta).trim();
+  const initialQuery = (
+    script.videoQueries[script.videoQueries.length - 1] ??
+    script.videoQueries[0] ??
+    ctaQuery
+  ).trim();
+
+  return {
+    originalText: ctaQuery,
+    translation:
+      language !== "ru" && ctaTranslation ? ctaTranslation : "",
+    slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
+      createManualSlot(initialQuery)
+    ),
+    slotDurations: null,
+  };
 }
 
 function splitWithVariance(total: number): [number, number, number] {
@@ -536,23 +572,30 @@ function buildManualGroups(
 
   const hookIndex = getSelectedHookIndex(selectedHook);
   const rawHook = (script.hooks[hookIndex] ?? script.hooks[0] ?? "").trim();
-  if (!rawHook) {
-    return sentenceGroups;
+  const ctaGroup = buildCtaManualGroup(script, language);
+
+  let groups: ManualGroup[] = sentenceGroups;
+
+  if (rawHook) {
+    const hookTranslation = parseRussianTranslation(rawHook);
+    const hookQuery = stripTranslation(rawHook).trim();
+    const hookGroup: ManualGroup = {
+      originalText: hookQuery,
+      translation:
+        language !== "ru" && hookTranslation ? hookTranslation : "",
+      slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
+        createManualSlot(hookQuery)
+      ),
+      slotDurations: null,
+    };
+    groups = [hookGroup, ...groups];
   }
 
-  const hookTranslation = parseRussianTranslation(rawHook);
-  const hookQuery = stripTranslation(rawHook).trim();
-  const hookGroup: ManualGroup = {
-    originalText: hookQuery,
-    translation:
-      language !== "ru" && hookTranslation ? hookTranslation : "",
-    slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
-      createManualSlot(hookQuery)
-    ),
-    slotDurations: null,
-  };
+  if (ctaGroup) {
+    groups = [...groups, ctaGroup];
+  }
 
-  return [hookGroup, ...sentenceGroups];
+  return groups;
 }
 
 function getManualSlotCalculatedDurations(
@@ -624,6 +667,38 @@ function hasManualMergeClips(
   return collectManualMergePayload(groups, calculated).clips.length > 0;
 }
 
+function normalizeSegmentDurations(
+  durations: number[],
+  totalAudioDuration: number
+): number[] {
+  if (durations.length === 0) {
+    return [];
+  }
+
+  const sum = durations.reduce((total, duration) => total + duration, 0);
+  if (sum <= 0) {
+    return durations;
+  }
+
+  const scale = totalAudioDuration / sum;
+  const normalized = durations.map(
+    (duration) => Math.round(duration * scale * 10) / 10
+  );
+
+  const normalizedSum = normalized.reduce(
+    (total, duration) => total + duration,
+    0
+  );
+  const drift = Math.round((totalAudioDuration - normalizedSum) * 10) / 10;
+  if (normalized.length > 0 && drift !== 0) {
+    const lastIndex = normalized.length - 1;
+    normalized[lastIndex] =
+      Math.round((normalized[lastIndex] + drift) * 10) / 10;
+  }
+
+  return normalized;
+}
+
 function estimateSegmentDurations(
   texts: string[],
   totalAudioDuration: number,
@@ -633,11 +708,13 @@ function estimateSegmentDurations(
     return [];
   }
 
+  let durations: number[];
+
   if (audioSegments && audioSegments.length > 0) {
     const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
     const totalChars = charCounts.reduce((a, b) => a + b, 0);
 
-    return texts.map((_, index) => {
+    durations = texts.map((_, index) => {
       const segment = audioSegments[index];
       if (segment) {
         return Math.round((segment.end - segment.start) * 10) / 10;
@@ -653,17 +730,19 @@ function estimateSegmentDurations(
         ) / 10
       );
     });
+  } else {
+    const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
+    const totalChars = charCounts.reduce((a, b) => a + b, 0);
+    if (totalChars === 0) {
+      return texts.map(() => 0);
+    }
+
+    durations = charCounts.map(
+      (c) => Math.round((c / totalChars) * totalAudioDuration * 10) / 10
+    );
   }
 
-  const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
-  const totalChars = charCounts.reduce((a, b) => a + b, 0);
-  if (totalChars === 0) {
-    return texts.map(() => 0);
-  }
-
-  return charCounts.map(
-    (c) => Math.round((c / totalChars) * totalAudioDuration * 10) / 10
-  );
+  return normalizeSegmentDurations(durations, totalAudioDuration);
 }
 
 function FootageQueryInput({
@@ -1881,14 +1960,52 @@ export default function Home() {
       }
 
       const preservedTranslation = getPreservedTranslation(panel.data.cta);
+      const fullText = combineWithTranslation(main, preservedTranslation);
+      const ctaMain = stripTranslation(fullText).trim();
+      const language = panel.language ?? "ru";
+      const hasCta = Boolean(panel.data.cta?.trim());
+
+      let footageGroups = panel.footageGroups;
+      if (hasCta && footageGroups.length > 0) {
+        const lastIndex = footageGroups.length - 1;
+        footageGroups = footageGroups.map((group, groupIndex) =>
+          groupIndex === lastIndex
+            ? { ...group, originalQuery: fullText }
+            : group
+        );
+      }
+
+      let manualGroups = panel.manualGroups;
+      if (hasCta && manualGroups.length > 0) {
+        const lastIndex = manualGroups.length - 1;
+        manualGroups = manualGroups.map((group, groupIndex) =>
+          groupIndex === lastIndex
+            ? {
+                ...group,
+                originalText: ctaMain,
+                translation:
+                  language !== "ru" && preservedTranslation
+                    ? preservedTranslation
+                    : "",
+                slots: group.slots.map((slot) => ({
+                  ...slot,
+                  query: ctaMain,
+                })),
+              }
+            : group
+        );
+      }
+
       return {
         ...prev,
         [videoId]: {
           ...panel,
           data: {
             ...panel.data,
-            cta: combineWithTranslation(main, preservedTranslation),
+            cta: fullText,
           },
+          footageGroups,
+          manualGroups,
         },
       };
     });
@@ -2890,14 +3007,24 @@ export default function Home() {
                                     panel.data?.hooks[hookIndex] ??
                                     panel.data?.hooks[0] ??
                                     "";
+                                  const rawCta = panel.data?.cta?.trim() ?? "";
                                   const isHookBlock =
                                     queryIndex === 0 &&
                                     Boolean(rawHook.trim()) &&
                                     stripTranslation(rawHook) ===
                                       group.originalQuery.trim();
+                                  const isCtaBlock =
+                                    Boolean(rawCta) &&
+                                    queryIndex ===
+                                      panel.footageGroups.length - 1 &&
+                                    (stripTranslation(rawCta) ===
+                                      group.originalQuery.trim() ||
+                                      rawCta === group.originalQuery.trim());
                                   const displayText = isHookBlock
                                     ? rawHook
-                                    : group.originalQuery;
+                                    : isCtaBlock
+                                      ? rawCta
+                                      : group.originalQuery;
 
                                   return (
                                   <div
