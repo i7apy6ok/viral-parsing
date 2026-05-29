@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getTranscript } from "@/lib/getTranscript";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 type ScriptLanguage = "ru" | "en" | "es";
 

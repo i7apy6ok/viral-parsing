@@ -1302,7 +1302,18 @@ export default function Home() {
         }),
       });
 
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: ScriptResult & { error?: string };
+      try {
+        data = JSON.parse(rawText) as ScriptResult & { error?: string };
+      } catch {
+        const preview = rawText.trim().slice(0, 200);
+        throw new Error(
+          preview.startsWith("<")
+            ? `Сервер вернул HTML вместо JSON (${res.status}). Возможен таймаут API — попробуйте снова.`
+            : preview || `Ошибка ${res.status}: ответ не JSON`
+        );
+      }
 
       if (!res.ok) {
         throw new Error(data.error ?? "Ошибка генерации сценария");
