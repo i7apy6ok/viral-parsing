@@ -251,12 +251,14 @@ function toggleLanguage(
 
 async function searchFootageVideos(
   queries: string[],
-  pages?: number[]
+  pages?: number[],
+  signal?: AbortSignal
 ): Promise<SearchVideoResult[]> {
   const res = await fetch("/api/search-videos", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ queries, pages }),
+    signal,
   });
 
   const data = await res.json();
@@ -1729,8 +1731,16 @@ export default function Home() {
       [videoId]: { ...prev[videoId], footageError: null },
     }));
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     try {
-      const results = await searchFootageVideos([searchQuery], [page]);
+      const results = await searchFootageVideos(
+        [searchQuery],
+        [page],
+        controller.signal
+      );
+      clearTimeout(timeout);
 
       updateManualGroups(videoId, (groups) =>
         groups.map((item, gi) => {
@@ -1759,7 +1769,11 @@ export default function Home() {
           };
         })
       );
-    } catch {
+    } catch (err) {
+      clearTimeout(timeout);
+      const isTimeout =
+        err instanceof Error && err.name === "AbortError";
+
       updateManualGroups(videoId, (groups) =>
         groups.map((item, gi) =>
           gi !== groupIndex
@@ -1773,8 +1787,9 @@ export default function Home() {
                         ...s,
                         query: rawQuery,
                         loading: false,
-                        searchError:
-                          "Ошибка поиска, попробуй другой запрос",
+                        searchError: isTimeout
+                          ? "Таймаут — попробуй другой запрос"
+                          : "Ошибка поиска, попробуй другой запрос",
                       }
                 ),
               }
