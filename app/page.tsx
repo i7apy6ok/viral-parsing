@@ -781,7 +781,8 @@ function FootageQueryInput({
               }
             : undefined
         }
-        className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+        className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+        style={{ height: "32px", boxSizing: "border-box" }}
         placeholder="Свой запрос в Стоки"
       />
       <button
@@ -789,7 +790,8 @@ function FootageQueryInput({
         title="Найти другое"
         disabled={disabled}
         onClick={() => runSearch()}
-        className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+        className="shrink-0 rounded-lg border border-zinc-700 px-2.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+        style={{ height: "32px", boxSizing: "border-box" }}
       >
         🔄
       </button>
@@ -887,7 +889,8 @@ function ManualFootageQueryInput({
               runSearch();
             }
           }}
-          className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+          className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+          style={{ height: "32px", boxSizing: "border-box" }}
           placeholder="Свой запрос в Стоки"
         />
         <button
@@ -895,7 +898,8 @@ function ManualFootageQueryInput({
           title="Найти другое"
           disabled={loading}
           onClick={runSearch}
-          className="shrink-0 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+          className="shrink-0 rounded-lg border border-zinc-700 px-2.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+          style={{ height: "32px", boxSizing: "border-box" }}
         >
           🔄
         </button>
@@ -962,7 +966,7 @@ function ManualFootageSlot({
             }}
             style={{
               width: "100%",
-              aspectRatio: "9/16",
+              height: "200px",
               objectFit: "cover",
               borderRadius: "8px",
               cursor: "pointer",
@@ -2430,12 +2434,8 @@ export default function Home() {
       ? videos.find((item) => item.videoId === openVideoId) ?? null
       : null;
   const activePanel = openVideoId ? scripts[openVideoId] : undefined;
-  const hasFootage = Boolean(
-    activePanel &&
-    (activePanel.footageGroups.length > 0 ||
-      activePanel.manualGroups.length > 0)
-  );
-  const hideVideoList = hasFootage && !videoListVisible;
+  const hasScriptPanel = activePanel?.data != null;
+  const hideVideoList = hasScriptPanel && !videoListVisible;
 
   useEffect(() => {
     if (!openVideoId) {
@@ -2444,10 +2444,10 @@ export default function Home() {
   }, [openVideoId]);
 
   useEffect(() => {
-    if (hasFootage) {
+    if (hasScriptPanel) {
       setVideoListVisible(false);
     }
-  }, [hasFootage]);
+  }, [hasScriptPanel]);
 
   const renderScriptPanel = (video: ViralVideoResult) => {
     const panel = scripts[video.videoId];
