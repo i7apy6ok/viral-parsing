@@ -966,7 +966,7 @@ function ManualFootageSlot({
             }}
             style={{
               width: "100%",
-              height: "280px",
+              height: "360px",
               objectFit: "cover",
               borderRadius: "8px",
               cursor: "pointer",
