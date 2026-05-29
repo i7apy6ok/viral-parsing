@@ -930,7 +930,7 @@ function ManualFootageSlot({
       : null;
 
   return (
-    <div className="min-w-0 flex-[0_0_30%] space-y-2">
+    <div className="min-w-0 flex-1 space-y-2" style={{ minWidth: "30%" }}>
       <ManualFootageQueryInput
         inputRef={inputRef}
         loading={slot.loading}
@@ -1184,6 +1184,7 @@ export default function Home() {
     {}
   );
   const [visibleCount, setVisibleCount] = useState(4);
+  const [videoListVisible, setVideoListVisible] = useState(true);
 
   const handleSearch = async () => {
     if (!keyword.trim()) {
@@ -2416,9 +2417,555 @@ export default function Home() {
     }
   };
 
+  const activeVideo =
+    openVideoId != null
+      ? videos.find((item) => item.videoId === openVideoId) ?? null
+      : null;
+  const activePanel = openVideoId ? scripts[openVideoId] : undefined;
+  const hasFootage = Boolean(
+    activePanel &&
+    (activePanel.footageGroups.length > 0 ||
+      activePanel.manualGroups.length > 0)
+  );
+  const hideVideoList = hasFootage && !videoListVisible;
+
+  useEffect(() => {
+    if (!openVideoId) {
+      setVideoListVisible(true);
+    }
+  }, [openVideoId]);
+
+  useEffect(() => {
+    if (hasFootage) {
+      setVideoListVisible(false);
+    }
+  }, [hasFootage]);
+
+  const renderScriptPanel = (video: ViralVideoResult) => {
+    const panel = scripts[video.videoId];
+
+    const segmentDurations =
+      panel &&
+      panel.audioDuration != null &&
+      panel.footageGroups.length > 0
+        ? estimateSegmentDurations(
+            panel.footageGroups.map((g) =>
+              segmentTextForDuration(
+                g.originalQuery,
+                panel.language ?? "ru"
+              )
+            ),
+            panel.audioDuration,
+            panel.audioSegments
+          )
+        : null;
+
+    return (
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-4">
+  {(!panel || panel.loading) && (
+    <div className="flex items-center justify-center gap-3 py-6">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+      <span className="text-sm text-zinc-400">
+        Генерируем сценарий…
+      </span>
+    </div>
+  )}
+
+  {panel?.error && !panel.loading && (
+    <p className="text-sm text-red-400">{panel.error}</p>
+  )}
+
+  {panel?.data && !panel.loading && (
+    <div className="space-y-4 text-sm">
+      <p className="text-xs text-zinc-500">
+        {panel.data.transcriptUsed
+          ? "Сценарий создан на основе транскрипции видео"
+          : "Транскрипция недоступна — сценарий по заголовку"}
+      </p>
+      <div>
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+          Хуки — выбери ✓ и нажми, чтобы скопировать
+        </h3>
+        <div className="space-y-2">
+          {panel.data.hooks.map((hook, i) => {
+            return (
+              <div
+                key={i}
+                className={`rounded-lg border px-3 py-2 transition-colors ${
+                  panel.selectedHook === i
+                    ? "border-amber-500/60 bg-zinc-800"
+                    : "border-zinc-700 bg-zinc-900"
+                }`}
+              >
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setScripts((prev) => ({
+                        ...prev,
+                        [video.videoId]: {
+                          ...prev[video.videoId],
+                          selectedHook: i,
+                        },
+                      }))
+                    }
+                    className="text-xs text-amber-400/80 transition-colors hover:text-amber-300"
+                  >
+                    {panel.selectedHook === i ? "✓ " : ""}
+                    Хук {i + 1}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleCopyHook(
+                        video.videoId,
+                        i,
+                        panel.data!.hooks[i]
+                      )
+                    }
+                    className="text-xs text-zinc-400 transition-colors hover:text-zinc-200"
+                  >
+                    {panel.copiedHook === i
+                      ? "Скопировано!"
+                      : "Копировать"}
+                  </button>
+                </div>
+                <ScriptEditableTextarea
+                  value={stripTranslation(hook)}
+                  translations={extractTranslations(hook)}
+                  minRows={2}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(nextMain) =>
+                    updateScriptHook(
+                      video.videoId,
+                      i,
+                      nextMain
+                    )
+                  }
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+          Основная часть
+        </h3>
+        <ScriptEditableTextarea
+          value={stripTranslation(panel.data.body)}
+          translations={extractTranslations(panel.data.body)}
+          minRows={4}
+          onChange={(main) =>
+            updateScriptBody(video.videoId, main)
+          }
+        />
+      </div>
+
+      <div>
+        <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+          CTA
+        </h3>
+        <ScriptEditableTextarea
+          value={stripTranslation(panel.data.cta)}
+          translations={extractTranslations(panel.data.cta)}
+          minRows={2}
+          onChange={(main) =>
+            updateScriptCta(video.videoId, main)
+          }
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={() =>
+          handleCopyAll(
+            video.videoId,
+            panel.data!,
+            panel.selectedHook
+          )
+        }
+        className="w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white"
+      >
+        {panel.copiedAll ? "Скопировано!" : "Скопировать всё"}
+      </button>
+
+      <button
+        type="button"
+        onClick={() =>
+          handleSynthesizeVoice(
+            video.videoId,
+            panel.data!,
+            panel.selectedHook
+          )
+        }
+        disabled={panel.voiceLoading}
+        className="w-full rounded-md border border-zinc-600 bg-zinc-800 py-2 text-sm text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-700 disabled:opacity-60"
+      >
+        {panel.voiceLoading
+          ? "Озвучиваем…"
+          : "🎙 Озвучить сценарий"}
+      </button>
+
+      {panel.voiceLoading && (
+        <div className="flex justify-center py-2">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+        </div>
+      )}
+
+      {panel.voiceError && !panel.voiceLoading && (
+        <p className="text-sm text-red-400">
+          {panel.voiceError}
+        </p>
+      )}
+
+      {panel.voiceAudioUrl && !panel.voiceLoading && (
+        <>
+          <audio
+            controls
+            src={panel.voiceAudioUrl}
+            className="w-full"
+          />
+
+          <ToggleGroup
+            label="Язык сценария и озвучки"
+            value={panel.language ?? "ru"}
+            onChange={(language) =>
+              setScripts((prev) => ({
+                ...prev,
+                [video.videoId]: {
+                  ...prev[video.videoId],
+                  language,
+                },
+              }))
+            }
+            options={SCRIPT_LANGUAGE_OPTIONS}
+          />
+
+          <ToggleGroup
+            label="Режим подбора футажа"
+            value={panel.clipMode}
+            onChange={(mode) =>
+              handleClipModeChange(
+                video.videoId,
+                mode,
+                panel.data!,
+                panel.selectedHook,
+                panel.language ?? "ru"
+              )
+            }
+            options={[
+              { value: "sentences", label: "По предложению" },
+              { value: "manual", label: "Ручной" },
+            ]}
+          />
+
+          <div>
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Видеоряд
+            </h3>
+
+            {panel.clipMode === "manual" ? (
+              <>
+                {panel.footageLoading &&
+                  panel.manualGroups.length === 0 && (
+                    <div className="mb-3 flex items-center gap-2 py-2">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                      <span className="text-xs text-zinc-400">
+                        Ищем видео на Pexels…
+                      </span>
+                    </div>
+                  )}
+
+                {panel.footageError && (
+                  <p className="mb-3 text-xs text-red-400">
+                    {panel.footageError}
+                  </p>
+                )}
+
+                <ManualFootageSection
+                  videoId={video.videoId}
+                  panel={panel}
+                  slotInputRefs={manualSlotInputRefs}
+                  onBlurCommit={(groupIndex, slotIndex, value) =>
+                    commitManualSlotQuery(
+                      video.videoId,
+                      groupIndex,
+                      slotIndex,
+                      value
+                    )
+                  }
+                  onSearch={(groupIndex, slotIndex, value) => {
+                    commitManualSlotQuery(
+                      video.videoId,
+                      groupIndex,
+                      slotIndex,
+                      value
+                    );
+                    void handleSearchManualSlot(
+                      video.videoId,
+                      groupIndex,
+                      slotIndex,
+                      value
+                    );
+                  }}
+                  onDurationChange={(
+                    groupIndex,
+                    slotIndex,
+                    value
+                  ) =>
+                    setManualSlotCustomDuration(
+                      video.videoId,
+                      groupIndex,
+                      slotIndex,
+                      value
+                    )
+                  }
+                  onCycleVideo={(groupIndex, slotIndex) =>
+                    handleCycleManualSlotVideo(
+                      video.videoId,
+                      groupIndex,
+                      slotIndex
+                    )
+                  }
+                />
+              </>
+            ) : (
+              <>
+            {panel.footageLoading &&
+              panel.footageGroups.length === 0 && (
+                <div className="flex items-center gap-2 py-3">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                  <span className="text-xs text-zinc-400">
+                    Ищем видео на Pexels…
+                  </span>
+                </div>
+              )}
+
+            {panel.footageError && (
+              <p className="mb-3 text-xs text-red-400">
+                {panel.footageError}
+              </p>
+            )}
+
+            <div className="space-y-4">
+              {panel.footageGroups.map((group, queryIndex) => {
+                const activeVideo =
+                  group.videos.length > 0
+                    ? group.videos[
+                        group.selectedIndex %
+                          group.videos.length
+                      ]
+                    : null;
+
+                const hookIndex = getSelectedHookIndex(
+                  panel.selectedHook
+                );
+                const rawHook =
+                  panel.data?.hooks[hookIndex] ??
+                  panel.data?.hooks[0] ??
+                  "";
+                const rawCta = panel.data?.cta?.trim() ?? "";
+                const isHookBlock =
+                  queryIndex === 0 &&
+                  Boolean(rawHook.trim()) &&
+                  stripTranslation(rawHook) ===
+                    group.originalQuery.trim();
+                const isCtaBlock =
+                  Boolean(rawCta) &&
+                  queryIndex ===
+                    panel.footageGroups.length - 1 &&
+                  (stripTranslation(rawCta) ===
+                    group.originalQuery.trim() ||
+                    rawCta === group.originalQuery.trim());
+                const displayText = isHookBlock
+                  ? rawHook
+                  : isCtaBlock
+                    ? rawCta
+                    : group.originalQuery;
+
+                return (
+                <div
+                  key={`${group.originalQuery}-${queryIndex}`}
+                >
+                  <div className="mb-2 space-y-1">
+                    <p className="text-xs leading-snug text-zinc-300">
+                      {renderWithTranslation(displayText)}
+                    </p>
+                    <FootageQueryInput
+                      key={`${video.videoId}-${queryIndex}-${group.originalQuery}`}
+                      disabled={group.loading}
+                      onBlurCommit={(value) =>
+                        commitFootageQuery(
+                          video.videoId,
+                          queryIndex,
+                          value
+                        )
+                      }
+                      onSearch={(value) => {
+                        commitFootageQuery(
+                          video.videoId,
+                          queryIndex,
+                          value
+                        );
+                        void handleSearchFootageGroup(
+                          video.videoId,
+                          queryIndex,
+                          value
+                        );
+                      }}
+                    />
+                  </div>
+
+                  {group.loading ? (
+                    <div className="flex justify-center py-4">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                    </div>
+                  ) : !activeVideo ? (
+                    <p className="text-xs text-zinc-500">
+                      Видео не найдены
+                    </p>
+                  ) : queryIndex === panel.openFootageIndex ? (
+                    <div className="space-y-2">
+                      <LazyFootageVideo
+                        videoUrl={activeVideo.url}
+                        poster={activeVideo.preview}
+                      />
+                      <FootageDurationLabel
+                        pexelsDuration={activeVideo.duration}
+                        estimatedDuration={
+                          segmentDurations?.[queryIndex] ?? null
+                        }
+                      />
+                      {group.videos.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCycleFootageVideo(
+                              video.videoId,
+                              queryIndex
+                            )
+                          }
+                          className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                        >
+                          Подобрать другой фрагмент
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <img
+                        src={activeVideo.preview}
+                        alt=""
+                        loading="lazy"
+                        onClick={() =>
+                          setScripts((prev) => ({
+                            ...prev,
+                            [video.videoId]: {
+                              ...prev[video.videoId],
+                              openFootageIndex: queryIndex,
+                            },
+                          }))
+                        }
+                        className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-zinc-700 object-cover opacity-60 transition-opacity hover:opacity-100"
+                      />
+                      <FootageDurationLabel
+                        pexelsDuration={activeVideo.duration}
+                        estimatedDuration={
+                          segmentDurations?.[queryIndex] ?? null
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+                );
+              })}
+            </div>
+              </>
+            )}
+
+            <input
+              type="text"
+              value={panel.customFootageQuery}
+              onChange={(e) =>
+                setScripts((prev) => ({
+                  ...prev,
+                  [video.videoId]: {
+                    ...prev[video.videoId],
+                    customFootageQuery: e.target.value,
+                  },
+                }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleCustomFootageQuery(video.videoId);
+                }
+              }}
+              placeholder="Свой запрос для Pexels, Enter — поиск"
+              className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+            />
+
+            <button
+              type="button"
+              onClick={() => void handleDownloadVideo(video.videoId)}
+              disabled={
+                panel.mergeLoading ||
+                (panel.clipMode === "manual"
+                  ? !hasManualMergeClips(
+                      panel.manualGroups,
+                      panel.audioDuration != null
+                        ? getManualSlotCalculatedDurations(
+                            panel.manualGroups,
+                            panel.audioDuration,
+                            panel.language ?? "ru"
+                          )
+                        : panel.manualGroups.map((group) =>
+                            group.slots.map(() => 0)
+                          )
+                    )
+                  : panel.footageLoading ||
+                    getSelectedFootageClips(
+                      panel.footageGroups
+                    ).length === 0)
+              }
+              className="mt-4 w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {panel.mergeLoading
+                ? panel.mergeStatus ?? "Скачиваем..."
+                : "Скачать видео"}
+            </button>
+
+            {panel.mergeError && (
+              <p className="mt-2 text-xs text-red-400">
+                {panel.mergeError}
+              </p>
+            )}
+
+            {panel.mergeStatus &&
+              !panel.mergeLoading &&
+              panel.mergeStatus === "Готово!" && (
+                <p className="mt-2 text-xs text-emerald-400">
+                  {panel.mergeStatus}
+                </p>
+              )}
+          </div>
+        </>
+      )}
+    </div>
+  )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <main className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+      <main
+        className={`mx-auto px-4 py-12 sm:px-6 ${
+          hideVideoList ? "max-w-full" : "max-w-2xl"
+        }`}
+      >
         <h1 className="mb-8 text-center text-2xl font-semibold tracking-tight sm:text-3xl">
           Найди вирусное видео
         </h1>
@@ -2597,28 +3144,40 @@ export default function Home() {
             </p>
           )}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {videos.length > 0 && (
+            <div
+              className={
+                openVideoId ? "flex items-start gap-4" : "space-y-4"
+              }
+            >
+              <div
+                className={openVideoId ? "min-w-0 shrink-0 space-y-4" : "space-y-4"}
+                style={
+                  openVideoId
+                    ? {
+                        display: hideVideoList ? "none" : undefined,
+                        width: hideVideoList ? undefined : "min(420px, 40%)",
+                      }
+                    : undefined
+                }
+              >
+                <div
+                  className={
+                    openVideoId
+                      ? "grid grid-cols-1 gap-3"
+                      : "grid grid-cols-1 gap-4 sm:grid-cols-2"
+                  }
+                >
             {videos.slice(0, visibleCount).map((video) => {
               const panel = scripts[video.videoId];
-              const segmentDurations =
-                panel &&
-                panel.audioDuration != null &&
-                panel.footageGroups.length > 0
-                  ? estimateSegmentDurations(
-                      panel.footageGroups.map((g) =>
-                        segmentTextForDuration(
-                          g.originalQuery,
-                          panel.language ?? "ru"
-                        )
-                      ),
-                      panel.audioDuration,
-                      panel.audioSegments
-                    )
-                  : null;
               return (
               <article
                 key={video.videoId}
-                className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 sm:col-span-1"
+                className={`overflow-hidden rounded-lg border bg-zinc-900/50 ${
+                  openVideoId && openVideoId === video.videoId
+                    ? "border-amber-500/60 ring-1 ring-amber-500/40"
+                    : "border-zinc-800"
+                } ${openVideoId ? "" : " sm:col-span-1"}`}
               >
                 <div className="relative">
                   {video.thumbnail && (
@@ -2701,516 +3260,40 @@ export default function Home() {
                   </button>
                 </div>
 
-                {openVideoId === video.videoId && (
-                  <div className="border-t border-zinc-800 bg-zinc-950/80 p-4">
-                    {(!panel || panel.loading) && (
-                      <div className="flex items-center justify-center gap-3 py-6">
-                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                        <span className="text-sm text-zinc-400">
-                          Генерируем сценарий…
-                        </span>
-                      </div>
-                    )}
-
-                    {panel?.error && !panel.loading && (
-                      <p className="text-sm text-red-400">{panel.error}</p>
-                    )}
-
-                    {panel?.data && !panel.loading && (
-                      <div className="space-y-4 text-sm">
-                        <p className="text-xs text-zinc-500">
-                          {panel.data.transcriptUsed
-                            ? "Сценарий создан на основе транскрипции видео"
-                            : "Транскрипция недоступна — сценарий по заголовку"}
-                        </p>
-                        <div>
-                          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                            Хуки — выбери ✓ и нажми, чтобы скопировать
-                          </h3>
-                          <div className="space-y-2">
-                            {panel.data.hooks.map((hook, i) => {
-                              return (
-                                <div
-                                  key={i}
-                                  className={`rounded-lg border px-3 py-2 transition-colors ${
-                                    panel.selectedHook === i
-                                      ? "border-amber-500/60 bg-zinc-800"
-                                      : "border-zinc-700 bg-zinc-900"
-                                  }`}
-                                >
-                                  <div className="mb-2 flex items-center justify-between gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setScripts((prev) => ({
-                                          ...prev,
-                                          [video.videoId]: {
-                                            ...prev[video.videoId],
-                                            selectedHook: i,
-                                          },
-                                        }))
-                                      }
-                                      className="text-xs text-amber-400/80 transition-colors hover:text-amber-300"
-                                    >
-                                      {panel.selectedHook === i ? "✓ " : ""}
-                                      Хук {i + 1}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        void handleCopyHook(
-                                          video.videoId,
-                                          i,
-                                          panel.data!.hooks[i]
-                                        )
-                                      }
-                                      className="text-xs text-zinc-400 transition-colors hover:text-zinc-200"
-                                    >
-                                      {panel.copiedHook === i
-                                        ? "Скопировано!"
-                                        : "Копировать"}
-                                    </button>
-                                  </div>
-                                  <ScriptEditableTextarea
-                                    value={stripTranslation(hook)}
-                                    translations={extractTranslations(hook)}
-                                    minRows={2}
-                                    onClick={(event) => event.stopPropagation()}
-                                    onChange={(nextMain) =>
-                                      updateScriptHook(
-                                        video.videoId,
-                                        i,
-                                        nextMain
-                                      )
-                                    }
-                                  />
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div>
-                          <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                            Основная часть
-                          </h3>
-                          <ScriptEditableTextarea
-                            value={stripTranslation(panel.data.body)}
-                            translations={extractTranslations(panel.data.body)}
-                            minRows={4}
-                            onChange={(main) =>
-                              updateScriptBody(video.videoId, main)
-                            }
-                          />
-                        </div>
-
-                        <div>
-                          <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                            CTA
-                          </h3>
-                          <ScriptEditableTextarea
-                            value={stripTranslation(panel.data.cta)}
-                            translations={extractTranslations(panel.data.cta)}
-                            minRows={2}
-                            onChange={(main) =>
-                              updateScriptCta(video.videoId, main)
-                            }
-                          />
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCopyAll(
-                              video.videoId,
-                              panel.data!,
-                              panel.selectedHook
-                            )
-                          }
-                          className="w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white"
-                        >
-                          {panel.copiedAll ? "Скопировано!" : "Скопировать всё"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleSynthesizeVoice(
-                              video.videoId,
-                              panel.data!,
-                              panel.selectedHook
-                            )
-                          }
-                          disabled={panel.voiceLoading}
-                          className="w-full rounded-md border border-zinc-600 bg-zinc-800 py-2 text-sm text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-700 disabled:opacity-60"
-                        >
-                          {panel.voiceLoading
-                            ? "Озвучиваем…"
-                            : "🎙 Озвучить сценарий"}
-                        </button>
-
-                        {panel.voiceLoading && (
-                          <div className="flex justify-center py-2">
-                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                          </div>
-                        )}
-
-                        {panel.voiceError && !panel.voiceLoading && (
-                          <p className="text-sm text-red-400">
-                            {panel.voiceError}
-                          </p>
-                        )}
-
-                        {panel.voiceAudioUrl && !panel.voiceLoading && (
-                          <>
-                            <audio
-                              controls
-                              src={panel.voiceAudioUrl}
-                              className="w-full"
-                            />
-
-                            <ToggleGroup
-                              label="Язык сценария и озвучки"
-                              value={panel.language ?? "ru"}
-                              onChange={(language) =>
-                                setScripts((prev) => ({
-                                  ...prev,
-                                  [video.videoId]: {
-                                    ...prev[video.videoId],
-                                    language,
-                                  },
-                                }))
-                              }
-                              options={SCRIPT_LANGUAGE_OPTIONS}
-                            />
-
-                            <ToggleGroup
-                              label="Режим подбора футажа"
-                              value={panel.clipMode}
-                              onChange={(mode) =>
-                                handleClipModeChange(
-                                  video.videoId,
-                                  mode,
-                                  panel.data!,
-                                  panel.selectedHook,
-                                  panel.language ?? "ru"
-                                )
-                              }
-                              options={[
-                                { value: "sentences", label: "По предложению" },
-                                { value: "manual", label: "Ручной" },
-                              ]}
-                            />
-
-                            <div>
-                              <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                                Видеоряд
-                              </h3>
-
-                              {panel.clipMode === "manual" ? (
-                                <>
-                                  {panel.footageLoading &&
-                                    panel.manualGroups.length === 0 && (
-                                      <div className="mb-3 flex items-center gap-2 py-2">
-                                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                                        <span className="text-xs text-zinc-400">
-                                          Ищем видео на Pexels…
-                                        </span>
-                                      </div>
-                                    )}
-
-                                  {panel.footageError && (
-                                    <p className="mb-3 text-xs text-red-400">
-                                      {panel.footageError}
-                                    </p>
-                                  )}
-
-                                  <ManualFootageSection
-                                    videoId={video.videoId}
-                                    panel={panel}
-                                    slotInputRefs={manualSlotInputRefs}
-                                    onBlurCommit={(groupIndex, slotIndex, value) =>
-                                      commitManualSlotQuery(
-                                        video.videoId,
-                                        groupIndex,
-                                        slotIndex,
-                                        value
-                                      )
-                                    }
-                                    onSearch={(groupIndex, slotIndex, value) => {
-                                      commitManualSlotQuery(
-                                        video.videoId,
-                                        groupIndex,
-                                        slotIndex,
-                                        value
-                                      );
-                                      void handleSearchManualSlot(
-                                        video.videoId,
-                                        groupIndex,
-                                        slotIndex,
-                                        value
-                                      );
-                                    }}
-                                    onDurationChange={(
-                                      groupIndex,
-                                      slotIndex,
-                                      value
-                                    ) =>
-                                      setManualSlotCustomDuration(
-                                        video.videoId,
-                                        groupIndex,
-                                        slotIndex,
-                                        value
-                                      )
-                                    }
-                                    onCycleVideo={(groupIndex, slotIndex) =>
-                                      handleCycleManualSlotVideo(
-                                        video.videoId,
-                                        groupIndex,
-                                        slotIndex
-                                      )
-                                    }
-                                  />
-                                </>
-                              ) : (
-                                <>
-                              {panel.footageLoading &&
-                                panel.footageGroups.length === 0 && (
-                                  <div className="flex items-center gap-2 py-3">
-                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                                    <span className="text-xs text-zinc-400">
-                                      Ищем видео на Pexels…
-                                    </span>
-                                  </div>
-                                )}
-
-                              {panel.footageError && (
-                                <p className="mb-3 text-xs text-red-400">
-                                  {panel.footageError}
-                                </p>
-                              )}
-
-                              <div className="space-y-4">
-                                {panel.footageGroups.map((group, queryIndex) => {
-                                  const activeVideo =
-                                    group.videos.length > 0
-                                      ? group.videos[
-                                          group.selectedIndex %
-                                            group.videos.length
-                                        ]
-                                      : null;
-
-                                  const hookIndex = getSelectedHookIndex(
-                                    panel.selectedHook
-                                  );
-                                  const rawHook =
-                                    panel.data?.hooks[hookIndex] ??
-                                    panel.data?.hooks[0] ??
-                                    "";
-                                  const rawCta = panel.data?.cta?.trim() ?? "";
-                                  const isHookBlock =
-                                    queryIndex === 0 &&
-                                    Boolean(rawHook.trim()) &&
-                                    stripTranslation(rawHook) ===
-                                      group.originalQuery.trim();
-                                  const isCtaBlock =
-                                    Boolean(rawCta) &&
-                                    queryIndex ===
-                                      panel.footageGroups.length - 1 &&
-                                    (stripTranslation(rawCta) ===
-                                      group.originalQuery.trim() ||
-                                      rawCta === group.originalQuery.trim());
-                                  const displayText = isHookBlock
-                                    ? rawHook
-                                    : isCtaBlock
-                                      ? rawCta
-                                      : group.originalQuery;
-
-                                  return (
-                                  <div
-                                    key={`${group.originalQuery}-${queryIndex}`}
-                                  >
-                                    <div className="mb-2 space-y-1">
-                                      <p className="text-xs leading-snug text-zinc-300">
-                                        {renderWithTranslation(displayText)}
-                                      </p>
-                                      <FootageQueryInput
-                                        key={`${video.videoId}-${queryIndex}-${group.originalQuery}`}
-                                        disabled={group.loading}
-                                        onBlurCommit={(value) =>
-                                          commitFootageQuery(
-                                            video.videoId,
-                                            queryIndex,
-                                            value
-                                          )
-                                        }
-                                        onSearch={(value) => {
-                                          commitFootageQuery(
-                                            video.videoId,
-                                            queryIndex,
-                                            value
-                                          );
-                                          void handleSearchFootageGroup(
-                                            video.videoId,
-                                            queryIndex,
-                                            value
-                                          );
-                                        }}
-                                      />
-                                    </div>
-
-                                    {group.loading ? (
-                                      <div className="flex justify-center py-4">
-                                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                                      </div>
-                                    ) : !activeVideo ? (
-                                      <p className="text-xs text-zinc-500">
-                                        Видео не найдены
-                                      </p>
-                                    ) : queryIndex === panel.openFootageIndex ? (
-                                      <div className="space-y-2">
-                                        <LazyFootageVideo
-                                          videoUrl={activeVideo.url}
-                                          poster={activeVideo.preview}
-                                        />
-                                        <FootageDurationLabel
-                                          pexelsDuration={activeVideo.duration}
-                                          estimatedDuration={
-                                            segmentDurations?.[queryIndex] ?? null
-                                          }
-                                        />
-                                        {group.videos.length > 1 && (
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              handleCycleFootageVideo(
-                                                video.videoId,
-                                                queryIndex
-                                              )
-                                            }
-                                            className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
-                                          >
-                                            Подобрать другой фрагмент
-                                          </button>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <div className="space-y-2">
-                                        <img
-                                          src={activeVideo.preview}
-                                          alt=""
-                                          loading="lazy"
-                                          onClick={() =>
-                                            setScripts((prev) => ({
-                                              ...prev,
-                                              [video.videoId]: {
-                                                ...prev[video.videoId],
-                                                openFootageIndex: queryIndex,
-                                              },
-                                            }))
-                                          }
-                                          className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-zinc-700 object-cover opacity-60 transition-opacity hover:opacity-100"
-                                        />
-                                        <FootageDurationLabel
-                                          pexelsDuration={activeVideo.duration}
-                                          estimatedDuration={
-                                            segmentDurations?.[queryIndex] ?? null
-                                          }
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
-                                  );
-                                })}
-                              </div>
-
-                              <input
-                                type="text"
-                                value={panel.customFootageQuery}
-                                onChange={(e) =>
-                                  setScripts((prev) => ({
-                                    ...prev,
-                                    [video.videoId]: {
-                                      ...prev[video.videoId],
-                                      customFootageQuery: e.target.value,
-                                    },
-                                  }))
-                                }
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    void handleCustomFootageQuery(video.videoId);
-                                  }
-                                }}
-                                placeholder="Свой запрос для Pexels, Enter — поиск"
-                                className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
-                              />
-                                </>
-                              )}
-
-                              <button
-                                type="button"
-                                onClick={() => void handleDownloadVideo(video.videoId)}
-                                disabled={
-                                  panel.mergeLoading ||
-                                  (panel.clipMode === "manual"
-                                    ? !hasManualMergeClips(
-                                        panel.manualGroups,
-                                        panel.audioDuration != null
-                                          ? getManualSlotCalculatedDurations(
-                                              panel.manualGroups,
-                                              panel.audioDuration,
-                                              panel.language ?? "ru"
-                                            )
-                                          : panel.manualGroups.map((group) =>
-                                              group.slots.map(() => 0)
-                                            )
-                                      )
-                                    : panel.footageLoading ||
-                                      getSelectedFootageClips(
-                                        panel.footageGroups
-                                      ).length === 0)
-                                }
-                                className="mt-4 w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {panel.mergeLoading
-                                  ? panel.mergeStatus ?? "Скачиваем..."
-                                  : "Скачать видео"}
-                              </button>
-
-                              {panel.mergeError && (
-                                <p className="mt-2 text-xs text-red-400">
-                                  {panel.mergeError}
-                                </p>
-                              )}
-
-                              {panel.mergeStatus &&
-                                !panel.mergeLoading &&
-                                panel.mergeStatus === "Готово!" && (
-                                  <p className="mt-2 text-xs text-emerald-400">
-                                    {panel.mergeStatus}
-                                  </p>
-                                )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
               </article>
             );
             })}
-          </div>
+              </div>
 
-          {videos.length > visibleCount && (
-            <button
-              type="button"
-              onClick={() => setVisibleCount((prev) => prev + 4)}
-              className="w-full rounded-lg border border-zinc-700 py-3 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
-            >
-              Смотреть ещё ({videos.length - visibleCount} видео)
-            </button>
+              {videos.length > visibleCount && (
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((prev) => prev + 4)}
+                  className="w-full rounded-lg border border-zinc-700 py-3 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                >
+                  Смотреть ещё ({videos.length - visibleCount} видео)
+                </button>
+              )}
+              </div>
+
+              {openVideoId && activeVideo && (
+                <div
+                  className="min-w-0 flex-1"
+                  style={{ width: hideVideoList ? "100%" : undefined }}
+                >
+                  {hideVideoList && (
+                    <button
+                      type="button"
+                      onClick={() => setVideoListVisible(true)}
+                      className="mb-4 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                    >
+                      ← Назад к видео
+                    </button>
+                  )}
+                  {renderScriptPanel(activeVideo)}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </main>
