@@ -24,6 +24,7 @@ export type ScriptResult = {
 };
 
 const CLAUDE_MODEL = "claude-sonnet-4-6";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 const LANGUAGE_LABELS: Record<ScriptLanguage, string> = {
   ru: "русский",
@@ -204,23 +205,15 @@ function claudeErrorMessage(status: number, data: unknown): string {
   return `Claude API ${status}: ${String(data)}`;
 }
 
-async function withRetry<T>(
-  fn: () => Promise<T>,
-  retries = 2,
-  delayMs = 3000
-): Promise<T> {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      const isLast = attempt === retries;
-      const isTimeout = error instanceof Error && error.name === "AbortError";
-      console.log(`Claude attempt ${attempt} failed (timeout: ${isTimeout}). ${isLast ? "Giving up." : "Retrying..."}`);
-      if (isLast) throw error;
-      await new Promise((r) => setTimeout(r, delayMs));
+function groqErrorMessage(status: number, data: unknown): string {
+  if (data && typeof data === "object" && data !== null) {
+    const apiError = (data as { error?: { message?: string } }).error;
+    if (typeof apiError?.message === "string") {
+      return `Groq API ${status}: ${apiError.message}`;
     }
+    return `Groq API ${status}: ${JSON.stringify(data)}`;
   }
-  throw new Error("unreachable");
+  return `Groq API ${status}: ${String(data)}`;
 }
 
 async function generateWithClaude(
@@ -237,10 +230,10 @@ async function generateWithClaude(
   console.log("Claude request URL:", url);
   console.log("Claude key prefix:", apiKey?.substring(0, 15));
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
 
+  try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -255,7 +248,6 @@ async function generateWithClaude(
       }),
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
 
     const rawText = await res.text();
     let data: unknown;
@@ -294,6 +286,93 @@ async function generateWithClaude(
       throw error;
     }
     throw new Error(String(error));
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function generateWithGroq(
+  prompt: string
+): Promise<Omit<ScriptResult, "transcriptUsed">> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error("GROQ_API_KEY is not configured");
+  }
+
+  const url = "https://api.groq.com/openai/v1/chat/completions";
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: 2500,
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await res.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(
+        `[Groq] returned invalid JSON: ${rawText.slice(0, 200)}`
+      );
+    }
+
+    if (!res.ok) {
+      throw new Error(groqErrorMessage(res.status, data));
+    }
+
+    const content = (
+      data as { choices?: Array<{ message?: { content?: string } }> }
+    ).choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      throw new Error(
+        `[Groq] empty response: ${JSON.stringify(data)}`
+      );
+    }
+
+    return parseScriptResponse(content);
+  } catch (error: unknown) {
+    console.error(
+      "[Groq]",
+      error instanceof Error ? error.message : error,
+      error
+    );
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(String(error));
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function generateScript(
+  prompt: string
+): Promise<Omit<ScriptResult, "transcriptUsed">> {
+  try {
+    return await generateWithClaude(prompt);
+  } catch (error) {
+    const isTimeout = error instanceof Error && error.name === "AbortError";
+    console.log(
+      `[generate] OneProvider failed (timeout: ${isTimeout}), falling back to Groq`
+    );
+
+    if (!process.env.GROQ_API_KEY) {
+      throw error;
+    }
+
+    return await generateWithGroq(prompt);
   }
 }
 
@@ -329,7 +408,7 @@ export async function POST(request: Request) {
       offer,
       language
     );
-    const script = await withRetry(() => generateWithClaude(prompt));
+    const script = await generateScript(prompt);
 
     return NextResponse.json({
       ...script,
