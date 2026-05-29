@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getTranscript } from "@/lib/getTranscript";
 
+export const maxDuration = 60;
+
 type ScriptLanguage = "ru" | "en" | "es";
 
 type GenerateScriptBody = {
@@ -217,6 +219,9 @@ async function generateWithClaude(
   console.log("Claude key prefix:", apiKey?.substring(0, 15));
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 50000);
+
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -229,7 +234,9 @@ async function generateWithClaude(
         max_tokens: 2500,
         messages: [{ role: "user", content: prompt }],
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const data = await res.json();
 
