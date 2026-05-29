@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -112,6 +113,92 @@ def fetch_transcript_with_ytdlp(video_id: str) -> str | None:
         return transcript or None
 
 
+def fetch_transcript_with_whisper(video_id: str) -> str | None:
+    api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not api_key:
+        print("[transcript] GROQ_API_KEY not set, Whisper skipped")
+        return None
+
+    tmpdir = tempfile.mkdtemp(prefix="whisper_")
+    audio_path: Path | None = None
+
+    try:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        output_template = str(Path(tmpdir) / f"{video_id}.%(ext)s")
+        cmd = [
+            "yt-dlp",
+            "-f",
+            "bestaudio[ext=m4a]/bestaudio",
+            "--extract-audio",
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "64K",
+            "-o",
+            output_template,
+            "--no-warnings",
+            url,
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            stderr = (result.stderr or result.stdout or "").strip()
+            print(f"[transcript] yt-dlp audio failed for {video_id}: {stderr}")
+            return None
+
+        expected_mp3 = Path(tmpdir) / f"{video_id}.mp3"
+        if expected_mp3.is_file():
+            audio_path = expected_mp3
+        else:
+            mp3_files = sorted(glob.glob(str(Path(tmpdir) / "*.mp3")))
+            if mp3_files:
+                audio_path = Path(mp3_files[0])
+
+        if not audio_path or not audio_path.is_file():
+            print(f"[transcript] No mp3 found for {video_id} in {tmpdir}")
+            return None
+
+        with open(audio_path, "rb") as audio_file:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (audio_path.name, audio_file, "audio/mpeg")},
+                data={
+                    "model": "whisper-large-v3-turbo",
+                    "response_format": "text",
+                },
+                timeout=60,
+            )
+
+        if response.ok and response.text.strip():
+            return response.text.strip()
+
+        print(
+            f"[transcript] Groq Whisper failed for {video_id}: "
+            f"{response.status_code} {response.text[:500]}"
+        )
+        return None
+    except subprocess.TimeoutExpired:
+        print(f"[transcript] yt-dlp audio timeout for {video_id}")
+        return None
+    except requests.RequestException as e:
+        print(f"[transcript] Groq Whisper request error for {video_id}: {e}")
+        return None
+    except Exception as e:
+        print(f"[transcript] Whisper error for {video_id}: {e}")
+        return None
+    finally:
+        if audio_path and audio_path.is_file():
+            audio_path.unlink(missing_ok=True)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -127,10 +214,11 @@ def transcript(body: TranscriptRequest):
     transcript_text = fetch_transcript_with_ytdlp(video_id)
 
     if not transcript_text:
-        raise HTTPException(
-            status_code=404,
-            detail="Russian auto-subtitles not found for this video",
-        )
+        print(f"[transcript] No subtitles for {video_id}, trying Whisper...")
+        transcript_text = fetch_transcript_with_whisper(video_id)
+
+    if not transcript_text:
+        raise HTTPException(status_code=404, detail="Transcript not available")
 
     return {"transcript": transcript_text}
 
