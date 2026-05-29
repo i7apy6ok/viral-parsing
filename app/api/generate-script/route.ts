@@ -204,6 +204,25 @@ function claudeErrorMessage(status: number, data: unknown): string {
   return `Claude API ${status}: ${String(data)}`;
 }
 
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 2,
+  delayMs = 3000
+): Promise<T> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isLast = attempt === retries;
+      const isTimeout = error instanceof Error && error.name === "AbortError";
+      console.log(`Claude attempt ${attempt} failed (timeout: ${isTimeout}). ${isLast ? "Giving up." : "Retrying..."}`);
+      if (isLast) throw error;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error("unreachable");
+}
+
 async function generateWithClaude(
   prompt: string
 ): Promise<Omit<ScriptResult, "transcriptUsed">> {
@@ -300,7 +319,7 @@ export async function POST(request: Request) {
       offer,
       language
     );
-    const script = await generateWithClaude(prompt);
+    const script = await withRetry(() => generateWithClaude(prompt));
 
     return NextResponse.json({
       ...script,
