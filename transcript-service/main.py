@@ -85,6 +85,10 @@ def fetch_transcript_with_ytdlp(video_id: str) -> str | None:
             "--no-warnings",
             "-o",
             output_template,
+            "--extractor-args",
+            "youtube:player_client=android_creator",
+            "--user-agent",
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             url,
         ]
 
@@ -137,6 +141,10 @@ def fetch_transcript_with_whisper(video_id: str) -> str | None:
             "-o",
             output_template,
             "--no-warnings",
+            "--extractor-args",
+            "youtube:player_client=android_creator",
+            "--user-agent",
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             url,
         ]
 

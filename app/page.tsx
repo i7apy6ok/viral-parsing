@@ -954,7 +954,7 @@ function ManualFootageSlot({
       ) : (
         <div className="space-y-1.5">
           <video
-            src={proxyUrl(activeVideo.url)}
+            src={activeVideo.url}
             poster={activeVideo.preview}
             muted
             loop
@@ -1151,7 +1151,7 @@ function LazyFootageVideo({
         <video
           ref={videoRef}
           key={videoUrl}
-          src={proxyUrl(videoUrl)}
+          src={videoUrl}
           poster={poster}
           muted
           loop

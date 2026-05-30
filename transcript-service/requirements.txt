@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-yt-dlp
+yt-dlp>=2025.5.0
 python-multipart
 requests
 supabase==2.10.0
