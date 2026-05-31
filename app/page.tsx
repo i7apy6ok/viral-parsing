@@ -231,11 +231,72 @@ function formatVoiceScript(
 ): string {
   const hookIndex = getSelectedHookIndex(selectedHook);
   const hook = script.hooks[hookIndex] ?? script.hooks[0] ?? "";
-
   return [hook, script.body, script.cta]
     .map(stripTranslation)
     .filter(Boolean)
     .join("\n\n");
+}
+
+function getSentenceChunks(
+  script: ScriptResult,
+  selectedHook: number | null
+): string[] {
+  const hookIndex = getSelectedHookIndex(selectedHook);
+  const hook = script.hooks[hookIndex] ?? script.hooks[0] ?? "";
+  const hookClean = stripTranslation(hook);
+
+  const bodyChunks =
+    script.sentences && script.sentences.length > 0
+      ? script.sentences.map(stripTranslation).filter(Boolean)
+      : [stripTranslation(script.body)].filter(Boolean);
+
+  const ctaClean = stripTranslation(script.cta);
+
+  return [hookClean, ...bodyChunks, ctaClean].filter(Boolean);
+}
+
+function audioBufferToWav(buffer: AudioBuffer): Blob {
+  const numChannels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1;
+  const bitDepth = 16;
+  const samples = buffer.length * numChannels;
+  const dataSize = samples * (bitDepth / 8);
+  const arrayBuffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(arrayBuffer);
+
+  function writeString(offset: number, str: string) {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  }
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * (bitDepth / 8), true);
+  view.setUint16(32, numChannels * (bitDepth / 8), true);
+  view.setUint16(34, bitDepth, true);
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < buffer.length; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      const sample = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]));
+      view.setInt16(
+        offset,
+        sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+        true
+      );
+      offset += 2;
+    }
+  }
+  return new Blob([arrayBuffer], { type: "audio/wav" });
 }
 
 function toggleLanguage(
@@ -2136,7 +2197,6 @@ export default function Home() {
     if (panel?.voiceAudioUrl) {
       URL.revokeObjectURL(panel.voiceAudioUrl);
     }
-
     setScripts((prev) => ({
       ...prev,
       [videoId]: {
@@ -2152,48 +2212,76 @@ export default function Home() {
     }));
 
     try {
-      const res = await fetch("/api/synthesize-voice", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: formatVoiceScript(script, selectedHook),
-        }),
-      });
+      const chunks = getSentenceChunks(script, selectedHook);
+      if (chunks.length === 0) throw new Error("Нет текста для озвучки");
 
-      const data = (await res.json()) as {
-        error?: string;
-        audioBase64?: string;
-        segments?: AudioSegment[];
-      };
+      const audioBuffers: ArrayBuffer[] = [];
+      for (const chunk of chunks) {
+        const res = await fetch("/api/synthesize-voice", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunk }),
+        });
+        const data = (await res.json()) as {
+          error?: string;
+          audioBase64?: string;
+        };
+        if (!res.ok) {
+          throw new Error(
+            typeof data.error === "string"
+              ? data.error
+              : `Ошибка Voicer: ${res.status}`
+          );
+        }
+        if (!data.audioBase64) throw new Error("Озвучка не вернула аудио");
 
-      if (!res.ok) {
-        throw new Error(
-          typeof data.error === "string" ? data.error : `Ошибка Voicer: ${res.status}`
-        );
+        const binary = atob(data.audioBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        audioBuffers.push(bytes.buffer);
       }
-
-      if (!data.audioBase64) {
-        throw new Error("Озвучка не вернула аудио");
-      }
-
-      const binary = atob(data.audioBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      const blob = new Blob([bytes], { type: "audio/mpeg" });
-      const audioSegments =
-        Array.isArray(data.segments) && data.segments.length > 0
-          ? data.segments
-          : null;
-      const audioUrl = URL.createObjectURL(blob);
 
       const audioContext = new AudioContext();
-      const audioBuffer = await audioContext.decodeAudioData(
-        await blob.arrayBuffer()
+      const decodedBuffers = await Promise.all(
+        audioBuffers.map((buf) => audioContext.decodeAudioData(buf.slice(0)))
       );
-      const audioDuration = audioBuffer.duration;
+      const chunkDurations = decodedBuffers.map((b) => b.duration);
+      const totalDuration = chunkDurations.reduce((a, b) => a + b, 0);
+
+      const sampleRate = decodedBuffers[0].sampleRate;
+      const numberOfChannels = decodedBuffers[0].numberOfChannels;
+      const totalSamples = Math.ceil(totalDuration * sampleRate);
+      const combined = audioContext.createBuffer(
+        numberOfChannels,
+        totalSamples,
+        sampleRate
+      );
+      let offset = 0;
+      for (const buf of decodedBuffers) {
+        for (let ch = 0; ch < numberOfChannels; ch++) {
+          combined.getChannelData(ch).set(buf.getChannelData(ch), offset);
+        }
+        offset += buf.length;
+      }
       await audioContext.close();
+
+      const wavBlob = audioBufferToWav(combined);
+
+      const audioSegments: AudioSegment[] = [];
+      let cursor = 0;
+      chunks.forEach((text, i) => {
+        const duration = chunkDurations[i];
+        audioSegments.push({
+          start: Math.round(cursor * 100) / 100,
+          end: Math.round((cursor + duration) * 100) / 100,
+          text,
+        });
+        cursor += duration;
+      });
+
+      const audioUrl = URL.createObjectURL(wavBlob);
 
       setScripts((prev) => {
         const panel = prev[videoId];
@@ -2202,11 +2290,10 @@ export default function Home() {
           panel?.clipMode === "manual" && panel.manualGroups.length > 0
             ? applyManualSlotDurations(
                 panel.manualGroups,
-                audioDuration,
+                totalDuration,
                 language
               )
             : panel?.manualGroups ?? [];
-
         return {
           ...prev,
           [videoId]: {
@@ -2214,8 +2301,8 @@ export default function Home() {
             voiceLoading: false,
             voiceError: null,
             voiceAudioUrl: audioUrl,
-            voiceAudioBlob: blob,
-            audioDuration,
+            voiceAudioBlob: wavBlob,
+            audioDuration: totalDuration,
             audioSegments,
             manualGroups,
           },
@@ -2404,7 +2491,7 @@ export default function Home() {
       const startTimes = selectedClips.map(() => 0);
 
       const formData = new FormData();
-      formData.append("audio", audioBlob, "audio.mp3");
+      formData.append("audio", audioBlob, "audio.wav");
       clipUrls.forEach((url) => formData.append("clip_urls", url));
       startTimes.forEach((t) => formData.append("start_times", String(t)));
       durations.forEach((d) => formData.append("durations", String(d)));

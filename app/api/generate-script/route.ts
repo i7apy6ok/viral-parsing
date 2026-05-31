@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getTranscript } from "@/lib/getTranscript";
 
 export const maxDuration = 120;
 
@@ -21,10 +20,12 @@ export type ScriptResult = {
   videoQueries: string[];
   sentences: string[];
   transcriptUsed: boolean;
+  provider?: string;
 };
 
 const CLAUDE_MODEL = "claude-sonnet-4-6";
 const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GEMINI_MODEL = "google/gemini-2.5-flash";
 
 const LANGUAGE_LABELS: Record<ScriptLanguage, string> = {
   ru: "русский",
@@ -39,10 +40,12 @@ function normalizeLanguage(language: unknown): ScriptLanguage {
   return "ru";
 }
 
+// ---------------------------------------------------------------------------
+// Prompt builder — no transcript block, Gemini watches the video directly
+// ---------------------------------------------------------------------------
 function buildPrompt(
   niche: string,
   title: string,
-  transcript: string | null,
   offer?: string,
   language: ScriptLanguage = "ru"
 ): string {
@@ -51,18 +54,14 @@ function buildPrompt(
     ? `CTA должен вести на: ${offerTrimmed}`
     : "Завершение с призывом подписаться или оставить комментарий.";
 
-  const sourceBlock = transcript
-    ? `Вот транскрипция вирусного видео: ${transcript}. Создай похожий сценарий для Shorts`
-    : `Название оригинального видео: ${title}\nТекст оригинала: субтитры недоступны`;
-
   return `Ты эксперт по вирусному контенту для русскоязычной аудитории.
 
 Пиши живым разговорным языком, избегай канцелярита и очевидных ИИ-шных фраз. Текст должен звучать как живой человек говорит на камеру.
 
 Тема ниши: ${niche}
-${transcript ? `Название оригинального видео: ${title}\n${sourceBlock}` : sourceBlock}
+Название оригинального видео: ${title}
 
-Создай адаптированный сценарий для короткого видео (30-60 сек):
+Посмотри видео выше и создай адаптированный сценарий для короткого видео (30-60 сек):
 
 1. ТРИ ВАРИАНТА ХУКА (первые 3 секунды):
 Хук 1 (Провокация): ...
@@ -82,7 +81,9 @@ ${ctaInstruction}
 7-15 коротких запросов, по одному на каждое предложение основной части. Запросы должны описывать визуальный ряд для каждой части сценария: хук, основная часть, CTA. Формулируй конкретно и визуально, как для поиска на Pexels. Пример: "woman looking at scale disappointed", "healthy food close up", "woman smiling mirror".
 
 6. ПРЕДЛОЖЕНИЯ (sentences):
-Разбей основную часть (body) на отдельные предложения — каждое предложение отдельный элемент массива sentences.
+Разбей основную часть (body) на отдельные предложения для озвучки по одному.
+Каждый элемент массива sentences — ровно одно предложение, не больше.
+Важно: sentences используются для TTS-озвучки по чанкам, поэтому не склеивай предложения вместе.
 ${
   language !== "ru"
     ? `
@@ -99,6 +100,9 @@ videoQueries для Pexels — только на английском, без с
 {"hooks":["текст хука 1","текст хука 2","текст хука 3"],"body":"основная часть","cta":"призыв к действию","visualHook":"визуальный хук","videoQueries":["query 1","query 2","query 3","query 4","query 5"],"sentences":["Предложение 1.","Предложение 2.","Предложение 3."]}`;
 }
 
+// ---------------------------------------------------------------------------
+// Response parsing (shared between all providers)
+// ---------------------------------------------------------------------------
 function splitBodyToSentences(body: string): string[] {
   return body
     .split(/[.!?]+/)
@@ -113,27 +117,23 @@ function normalizeSentences(sentences: unknown, body: string): string[] {
       .map((sentence) => sentence.trim())
       .filter(Boolean);
   }
-
   return splitBodyToSentences(body);
 }
 
 function normalizeVideoQueries(queries: unknown): string[] {
-  if (!Array.isArray(queries)) {
-    return [];
-  }
-
+  if (!Array.isArray(queries)) return [];
   return queries
     .map(String)
     .map((q) => q.trim())
     .filter(Boolean);
 }
 
-function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed"> {
+function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed" | "provider"> {
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]) as Partial<
-        Omit<ScriptResult, "transcriptUsed">
+        Omit<ScriptResult, "transcriptUsed" | "provider">
       >;
       if (parsed.hooks && parsed.body && parsed.cta && parsed.visualHook) {
         const body = String(parsed.body);
@@ -187,48 +187,98 @@ function parseScriptResponse(text: string): Omit<ScriptResult, "transcriptUsed">
   };
 }
 
-type ClaudeApiError = Error & {
-  response?: { data?: unknown };
-};
+// ---------------------------------------------------------------------------
+// Provider: OpenRouter + Gemini 2.5 Flash (PRIMARY)
+// Gemini natively understands YouTube video URLs — no transcript needed
+// ---------------------------------------------------------------------------
+async function generateWithOpenRouter(
+  videoId: string,
+  prompt: string
+): Promise<Omit<ScriptResult, "transcriptUsed" | "provider">> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
 
-function claudeErrorMessage(status: number, data: unknown): string {
-  if (data && typeof data === "object" && data !== null) {
-    const apiError = (data as { error?: { message?: string; type?: string } })
-      .error;
-    if (typeof apiError?.message === "string") {
-      const typeSuffix =
-        typeof apiError.type === "string" ? ` (${apiError.type})` : "";
-      return `Claude API ${status}: ${apiError.message}${typeSuffix}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        // Recommended by OpenRouter for ranking/attribution
+        "HTTP-Referer": "https://viral-parsing.vercel.app",
+        "X-Title": "Viral Parsing Script Generator",
+      },
+      body: JSON.stringify({
+        model: GEMINI_MODEL,
+        max_tokens: 2500,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "video_url",
+                video_url: {
+                  url: `https://www.youtube.com/watch?v=${videoId}`,
+                },
+              },
+              {
+                type: "text",
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await res.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(`OpenRouter returned invalid JSON: ${rawText.slice(0, 200)}`);
     }
-    return `Claude API ${status}: ${JSON.stringify(data)}`;
+
+    if (!res.ok) {
+      const apiError = (data as { error?: { message?: string } })?.error;
+      throw new Error(
+        `OpenRouter API ${res.status}: ${apiError?.message ?? JSON.stringify(data)}`
+      );
+    }
+
+    const content = (
+      data as { choices?: Array<{ message?: { content?: string } }> }
+    ).choices?.[0]?.message?.content;
+
+    if (typeof content !== "string") {
+      throw new Error(`Empty response from OpenRouter/Gemini: ${JSON.stringify(data)}`);
+    }
+
+    console.log(`[OpenRouter] OK for ${videoId}, response length ${content.length}`);
+    return parseScriptResponse(content);
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return `Claude API ${status}: ${String(data)}`;
 }
 
-function groqErrorMessage(status: number, data: unknown): string {
-  if (data && typeof data === "object" && data !== null) {
-    const apiError = (data as { error?: { message?: string } }).error;
-    if (typeof apiError?.message === "string") {
-      return `Groq API ${status}: ${apiError.message}`;
-    }
-    return `Groq API ${status}: ${JSON.stringify(data)}`;
-  }
-  return `Groq API ${status}: ${String(data)}`;
-}
+// ---------------------------------------------------------------------------
+// Provider: Anthropic Claude via OneProvider (SECONDARY fallback)
+// Falls back to text-only prompt when Gemini is unavailable
+// ---------------------------------------------------------------------------
+type ClaudeApiError = Error & { response?: { data?: unknown } };
 
 async function generateWithClaude(
   prompt: string
-): Promise<Omit<ScriptResult, "transcriptUsed">> {
+): Promise<Omit<ScriptResult, "transcriptUsed" | "provider">> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not configured");
-  }
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
 
   const baseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
   const url = `${baseUrl}/v1/messages`;
-
-  console.log("Claude request URL:", url);
-  console.log("Claude key prefix:", apiKey?.substring(0, 15));
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
@@ -254,57 +304,45 @@ async function generateWithClaude(
     try {
       data = JSON.parse(rawText);
     } catch {
-      throw new Error(
-        `OneProvider returned invalid JSON: ${rawText.slice(0, 200)}`
-      );
+      throw new Error(`Claude returned invalid JSON: ${rawText.slice(0, 200)}`);
     }
 
     if (!res.ok) {
-      const err = new Error(claudeErrorMessage(res.status, data)) as ClaudeApiError;
+      const apiError = (data as { error?: { message?: string; type?: string } })?.error;
+      const typeSuffix = apiError?.type ? ` (${apiError.type})` : "";
+      const err = new Error(
+        `Claude API ${res.status}: ${apiError?.message ?? JSON.stringify(data)}${typeSuffix}`
+      ) as ClaudeApiError;
       err.response = { data };
       throw err;
     }
 
-    const content = (
-      data as { content?: Array<{ text?: string }> }
-    ).content?.[0]?.text;
+    const content = (data as { content?: Array<{ text?: string }> }).content?.[0]?.text;
     if (typeof content !== "string") {
-      throw new Error(
-        `Empty response from Claude: ${JSON.stringify(data)}`
-      );
+      throw new Error(`Empty response from Claude: ${JSON.stringify(data)}`);
     }
 
+    console.log(`[Claude] OK, response length ${content.length}`);
     return parseScriptResponse(content);
-  } catch (error: unknown) {
-    const err = error as ClaudeApiError;
-    console.error(
-      "Claude API error:",
-      err?.message,
-      JSON.stringify(err?.response?.data || error)
-    );
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error(String(error));
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
+// ---------------------------------------------------------------------------
+// Provider: Groq (LAST RESORT fallback)
+// ---------------------------------------------------------------------------
 async function generateWithGroq(
   prompt: string
-): Promise<Omit<ScriptResult, "transcriptUsed">> {
+): Promise<Omit<ScriptResult, "transcriptUsed" | "provider">> {
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    throw new Error("GROQ_API_KEY is not configured");
-  }
+  if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
 
-  const url = "https://api.groq.com/openai/v1/chat/completions";
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
-    const res = await fetch(url, {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -323,59 +361,78 @@ async function generateWithGroq(
     try {
       data = JSON.parse(rawText);
     } catch {
-      throw new Error(
-        `[Groq] returned invalid JSON: ${rawText.slice(0, 200)}`
-      );
+      throw new Error(`Groq returned invalid JSON: ${rawText.slice(0, 200)}`);
     }
 
     if (!res.ok) {
-      throw new Error(groqErrorMessage(res.status, data));
+      const apiError = (data as { error?: { message?: string } })?.error;
+      throw new Error(`Groq API ${res.status}: ${apiError?.message ?? JSON.stringify(data)}`);
     }
 
     const content = (
       data as { choices?: Array<{ message?: { content?: string } }> }
     ).choices?.[0]?.message?.content;
+
     if (typeof content !== "string") {
-      throw new Error(
-        `[Groq] empty response: ${JSON.stringify(data)}`
-      );
+      throw new Error(`Empty response from Groq: ${JSON.stringify(data)}`);
     }
 
+    console.log(`[Groq] OK, response length ${content.length}`);
     return parseScriptResponse(content);
-  } catch (error: unknown) {
-    console.error(
-      "[Groq]",
-      error instanceof Error ? error.message : error,
-      error
-    );
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error(String(error));
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
+// ---------------------------------------------------------------------------
+// Orchestrator: OpenRouter → Claude → Groq
+// ---------------------------------------------------------------------------
 async function generateScript(
+  videoId: string,
   prompt: string
-): Promise<Omit<ScriptResult, "transcriptUsed">> {
-  try {
-    return await generateWithClaude(prompt);
-  } catch (error) {
-    const isTimeout = error instanceof Error && error.name === "AbortError";
-    console.log(
-      `[generate] OneProvider failed (timeout: ${isTimeout}), falling back to Groq`
-    );
-
-    if (!process.env.GROQ_API_KEY) {
-      throw error;
+): Promise<{ result: Omit<ScriptResult, "transcriptUsed" | "provider">; provider: string }> {
+  // 1. Try OpenRouter + Gemini (watches video natively)
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      const result = await generateWithOpenRouter(videoId, prompt);
+      return { result, provider: "gemini-2.5-flash" };
+    } catch (error) {
+      const isTimeout = error instanceof Error && error.name === "AbortError";
+      console.warn(
+        `[orchestrator] OpenRouter failed (timeout: ${isTimeout}): ${
+          error instanceof Error ? error.message : error
+        }, trying Claude...`
+      );
     }
-
-    return await generateWithGroq(prompt);
+  } else {
+    console.warn("[orchestrator] OPENROUTER_API_KEY not set, skipping Gemini");
   }
+
+  // 2. Try Claude via OneProvider
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const result = await generateWithClaude(prompt);
+      return { result, provider: "claude-sonnet-4-6" };
+    } catch (error) {
+      const isTimeout = error instanceof Error && error.name === "AbortError";
+      console.warn(
+        `[orchestrator] Claude failed (timeout: ${isTimeout}): ${
+          error instanceof Error ? error.message : error
+        }, trying Groq...`
+      );
+    }
+  } else {
+    console.warn("[orchestrator] ANTHROPIC_API_KEY not set, skipping Claude");
+  }
+
+  // 3. Last resort: Groq
+  const result = await generateWithGroq(prompt);
+  return { result, provider: "groq-llama-3.3-70b" };
 }
 
+// ---------------------------------------------------------------------------
+// Route handler
+// ---------------------------------------------------------------------------
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Partial<GenerateScriptBody>;
@@ -392,37 +449,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "niche is required" }, { status: 400 });
     }
 
-    const transcript = await getTranscript(videoId.trim());
-    const transcriptUsed = transcript !== null;
+    console.log(`[generate-script] videoId=${videoId}, niche=${niche}, lang=${language}`);
 
-    console.log(
-      "generate-script:",
-      videoId,
-      transcriptUsed ? `transcript ${transcript!.length} chars` : "no transcript"
-    );
-
-    const prompt = buildPrompt(
-      niche.trim(),
-      title.trim(),
-      transcript,
-      offer,
-      language
-    );
-    const script = await generateScript(prompt);
+    const prompt = buildPrompt(niche.trim(), title.trim(), offer, language);
+    const { result, provider } = await generateScript(videoId.trim(), prompt);
 
     return NextResponse.json({
-      ...script,
-      transcriptUsed,
+      ...result,
+      transcriptUsed: false, // Gemini watches video directly; no separate transcript step
+      provider,
     });
   } catch (error: unknown) {
-    const err = error as ClaudeApiError;
-    console.error(
-      "Claude API error:",
-      err?.message,
-      JSON.stringify(err?.response?.data || error)
-    );
-    const message =
-      error instanceof Error ? error.message : "Internal server error";
+    const message = error instanceof Error ? error.message : "Internal server error";
+    console.error("[generate-script] fatal error:", message, error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

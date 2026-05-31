@@ -52,7 +52,11 @@ type VideoDetails = {
 type YouTubeChannelItem = {
   id: string;
   snippet: { publishedAt: string; title: string };
-  statistics: { subscriberCount?: string };
+  statistics: {
+    subscriberCount?: string;
+    viewCount?: string;
+    videoCount?: string;
+  };
 };
 
 export type ViralVideoResult = {
@@ -90,6 +94,12 @@ const LANGUAGE_TO_REGION: Record<VideoLanguage, string> = {
   ru: "RU",
   en: "US",
   es: "ES",
+};
+
+const LANGUAGE_TO_RELEVANCE: Record<VideoLanguage, string> = {
+  ru: "ru",
+  en: "en",
+  es: "es",
 };
 
 function chunkIds(ids: string[], size = YOUTUBE_ID_CHUNK_SIZE): string[][] {
@@ -293,7 +303,8 @@ function buildSearchParams(
   keyword: string,
   type: VideoType,
   period: Period,
-  regionCode: string
+  regionCode: string,
+  relevanceLanguage: string
 ): Record<string, string> {
   const params: Record<string, string> = {
     part: "snippet",
@@ -302,17 +313,15 @@ function buildSearchParams(
     maxResults: "50",
     order: "viewCount",
     regionCode,
+    relevanceLanguage,
   };
-
   if (type === "short") {
     params.videoDuration = "short";
   }
-
   const publishedAfter = periodToPublishedAfter(period);
   if (publishedAfter) {
     params.publishedAfter = publishedAfter;
   }
-
   return params;
 }
 
@@ -327,10 +336,11 @@ async function fetchSearchItems(
 
   for (const lang of languages) {
     const regionCode = LANGUAGE_TO_REGION[lang];
+    const relevanceLanguage = LANGUAGE_TO_RELEVANCE[lang];
     try {
       const searchData = await fetchYouTube<{ items?: YouTubeSearchItem[] }>(
         "search",
-        buildSearchParams(keyword, type, period, regionCode)
+        buildSearchParams(keyword, type, period, regionCode, relevanceLanguage)
       );
       console.log(
         `search.list [${lang}, regionCode=${regionCode}]:`,
@@ -539,7 +549,14 @@ export async function POST(request: Request) {
 
       const viewCount = parseCount(statistics.viewCount);
       const subscriberCount = parseCount(channel.statistics.subscriberCount);
-      const viralScore = viewCount / (subscriberCount + 1);
+      const channelTotalViews = parseCount(channel.statistics.viewCount);
+      const channelVideoCount = parseCount(channel.statistics.videoCount) || 1;
+      const avgViewsPerVideo = channelTotalViews / channelVideoCount;
+      const viralMultiplier =
+        avgViewsPerVideo > 0
+          ? viewCount / avgViewsPerVideo
+          : viewCount / (subscriberCount + 1);
+      const viralScore = viralMultiplier;
 
       afterChannelFilter.push({
         videoId,
@@ -555,16 +572,14 @@ export async function POST(request: Request) {
       });
     }
 
-    console.log("После фильтра каналов:", afterChannelFilter.length);
-    if (newChannelsOnly) {
-      console.log("Отсеяно по newChannelsOnly:", skippedByNewChannel);
-    }
-    if (type === "long") {
-      console.log(
-        `Отсеяно по duration (<=${MIN_LONG_DURATION_SECONDS}s):`,
-        skippedByDuration
-      );
-    }
+    console.log(
+      "После фильтра каналов:",
+      afterChannelFilter.length,
+      "| отсеяно newChannelsOnly:",
+      skippedByNewChannel,
+      "| отсеяно duration:",
+      skippedByDuration
+    );
 
     let results = afterChannelFilter.filter((v) => v.viewCount >= minViewsNum);
     console.log(
@@ -578,9 +593,9 @@ export async function POST(request: Request) {
 
     if (sortByValue === "viralScore") {
       const beforeViral = results.length;
-      results = results.filter((v) => v.viralScore > 1);
+      results = results.filter((v) => v.viralScore > 3);
       console.log(
-        "После viralScore > 1:",
+        "После viralScore > 3:",
         results.length,
         "отсеяно:",
         beforeViral - results.length
@@ -599,7 +614,7 @@ export async function POST(request: Request) {
       );
       sortResults(fallback, sortByValue);
       results = fallback.slice(0, 10);
-      console.log("Fallback: топ-10 без viralScore > 1:", results.length);
+      console.log("Fallback: топ-10 без viralScore > 3:", results.length);
     }
 
     console.log("Итого в ответе:", results.length, "sortBy:", sortBy);
