@@ -16,6 +16,7 @@ type SearchBody = {
   minViews?: number;
   sortBy: SortBy;
   languages: string[];
+  expandedSearch?: boolean;
 };
 
 type YouTubeSearchItem = {
@@ -392,6 +393,7 @@ export async function POST(request: Request) {
       minViews = DEFAULT_MIN_VIEWS,
       sortBy = "views",
       languages: rawLanguages,
+      expandedSearch = true,
     } = body;
 
     if (!keyword?.trim()) {
@@ -468,12 +470,64 @@ export async function POST(request: Request) {
       console.log("publishedAfter:", publishedAfter, "period:", period);
     }
 
-    const searchItems = await fetchSearchItems(
-      keyword.trim(),
-      type,
-      period as Period,
-      languages
+    // Генерируем синонимы через OpenRouter если expandedSearch включён
+    let keywords = [keyword.trim()];
+    if (expandedSearch && process.env.OPENROUTER_API_KEY) {
+      try {
+        const synRes = await fetch(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+              "HTTP-Referer": "https://viral-parsing.vercel.app",
+            },
+            body: JSON.stringify({
+              model: "google/gemini-2.5-flash",
+              max_tokens: 200,
+              messages: [
+                {
+                  role: "user",
+                  content: `Дай 5 синонимов и смежных поисковых запросов для YouTube на тему "${keyword.trim()}". Только слова/фразы через запятую, без нумерации и пояснений. Пример для "диета": похудение, правильное питание, калории, дефицит калорий, жиросжигание`,
+                },
+              ],
+            }),
+          }
+        );
+        if (synRes.ok) {
+          const synData = (await synRes.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+          };
+          const synText = synData.choices?.[0]?.message?.content ?? "";
+          const synonyms = synText
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .slice(0, 5);
+          keywords = [keyword.trim(), ...synonyms];
+          console.log("[expandedSearch] keywords:", keywords);
+        }
+      } catch (err) {
+        console.warn("[expandedSearch] synonym generation failed:", err);
+      }
+    }
+
+    // Параллельный поиск по всем ключевым словам
+    const allSearchResults = await Promise.all(
+      keywords.map((kw) =>
+        fetchSearchItems(kw, type, period as Period, languages)
+      )
     );
+    // Дедупликация по videoId
+    const seenIds = new Set<string>();
+    const searchItems = allSearchResults.flat().filter((item) => {
+      const id = item.id?.videoId;
+      if (!id || seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
+    console.log("[search] total items after dedup:", searchItems.length);
 
     console.log("Найдено видео:", searchItems.length);
     if (searchItems.length === 0) {

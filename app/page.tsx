@@ -1236,6 +1236,7 @@ function LazyFootageVideo({
 
 export default function Home() {
   const [keyword, setKeyword] = useState("");
+  const [expandedSearch, setExpandedSearch] = useState(true);
   const [offer, setOffer] = useState("");
   const [platform, setPlatform] = useState<Platform>("youtube");
   const [type, setType] = useState<VideoType>("short");
@@ -1291,6 +1292,7 @@ export default function Home() {
       minViews,
       sortBy,
       languages,
+      expandedSearch,
     };
 
     const endpoint =
@@ -3289,6 +3291,16 @@ export default function Home() {
               <span>месяцев</span>
             </div>
           </div>
+
+          <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={expandedSearch}
+              onChange={(e) => setExpandedSearch(e.target.checked)}
+              className="rounded border-zinc-600 bg-zinc-900 accent-amber-500"
+            />
+            Искать по смежным темам
+          </label>
 
           <button
             type="button"
