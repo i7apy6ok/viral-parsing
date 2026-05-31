@@ -72,6 +72,7 @@ type ScriptPanelState = {
   voiceAudioBlob: Blob | null;
   audioDuration: number | null;
   audioSegments: AudioSegment[] | null;
+  audioChunks: Blob[] | null;
   footageLoading: boolean;
   footageError: string | null;
   footageGroups: FootageGroup[];
@@ -97,6 +98,7 @@ const FOOTAGE_DEFAULTS = {
   mergeError: null,
   openFootageIndex: null,
   audioSegments: null,
+  audioChunks: null,
 };
 
 const RAILWAY_MERGE_URL =
@@ -2269,6 +2271,12 @@ export default function Home() {
 
       const wavBlob = audioBufferToWav(combined);
 
+      // Сохраняем каждый чанк как отдельный WAV blob
+      const audioChunkBlobs = audioBuffers.map((buf) => {
+        const decoded = decodedBuffers[audioBuffers.indexOf(buf)];
+        return audioBufferToWav(decoded);
+      });
+
       const audioSegments: AudioSegment[] = [];
       let cursor = 0;
       chunks.forEach((text, i) => {
@@ -2304,6 +2312,7 @@ export default function Home() {
             voiceAudioBlob: wavBlob,
             audioDuration: totalDuration,
             audioSegments,
+            audioChunks: audioChunkBlobs,
             manualGroups,
           },
         };
@@ -3030,6 +3039,15 @@ export default function Home() {
                         }
                       />
                     </div>
+                  )}
+                  {panel.audioChunks?.[queryIndex] && (
+                    <audio
+                      controls
+                      src={URL.createObjectURL(
+                        panel.audioChunks[queryIndex]
+                      )}
+                      className="mt-2 h-8 w-full"
+                    />
                   )}
                 </div>
                 );
