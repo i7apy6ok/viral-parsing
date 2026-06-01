@@ -501,7 +501,7 @@ async function generateWithClaude(
   const url = `${baseUrl}/v1/messages`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
 
   try {
     const res = await fetch(url, {
