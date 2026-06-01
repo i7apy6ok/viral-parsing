@@ -123,36 +123,29 @@ async function fetchYouTube<T>(
     process.env.YOUTUBE_API_KEY_3,
   ].filter(Boolean) as string[];
 
-  let lastError: Error = new Error("Нет ключей");
+  if (keys.length === 0) {
+    throw new Error("Нет доступных YouTube API ключей");
+  }
 
   for (const apiKey of keys) {
-    try {
-      const url = new URL(`${YOUTUBE_API}/${path}`);
-      for (const [key, value] of Object.entries(params)) {
-        url.searchParams.set(key, value);
-      }
-      url.searchParams.set("key", apiKey);
-
-      const res = await fetch(url.toString());
-      const data = await res.json();
-
-      if (res.status === 403 && JSON.stringify(data).includes("quota")) {
-        lastError = new Error("quota");
-        continue;
-      }
-
-      if (!res.ok) {
-        throw new Error(data?.error?.message ?? "YouTube API error");
-      }
-
-      return data as T;
-    } catch (err) {
-      if (err instanceof Error && err.message === "quota") {
-        lastError = err;
-        continue;
-      }
-      throw err;
+    const url = new URL(`${YOUTUBE_API}/${path}`);
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
     }
+    url.searchParams.set("key", apiKey);
+
+    const res = await fetch(url.toString());
+    const data = await res.json();
+
+    if (res.status === 403 && JSON.stringify(data).includes("quota")) {
+      continue;
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.error?.message ?? "YouTube API error");
+    }
+
+    return data as T;
   }
 
   throw new Error(
