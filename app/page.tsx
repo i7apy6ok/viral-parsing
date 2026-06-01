@@ -1328,7 +1328,7 @@ function HomePage() {
   const [type, setType] = useState<VideoType>("short");
   const [period, setPeriod] = useState<Period>("30d");
   const [minViews, setMinViews] = useState(10000);
-  const [sortBy, setSortBy] = useState<SortBy>("views");
+  const [sortBy, setSortBy] = useState<SortBy>("velocity");
   const [languages, setLanguages] = useState<VideoLanguage[]>([
     "ru",
     "en",
@@ -3196,6 +3196,16 @@ function HomePage() {
             className="w-full rounded-lg border border-purple-900/50 bg-[#1a1035] px-4 py-3 text-purple-50 placeholder:text-purple-400/50 outline-none transition-colors focus:border-purple-700 focus:ring-1 focus:ring-zinc-600"
           />
 
+          <label className="flex items-center gap-2 text-sm text-purple-300/70 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={expandedSearch}
+              onChange={(e) => setExpandedSearch(e.target.checked)}
+              className="rounded border-purple-700 bg-[#1a1035] accent-fuchsia-500"
+            />
+            Искать по смежным темам
+          </label>
+
           <div className="space-y-2">
             <label className="text-sm text-purple-300/70">
               Ваш оффер (необязательно)
@@ -3336,16 +3346,6 @@ function HomePage() {
               <span>месяцев</span>
             </div>
           </div>
-
-          <label className="flex items-center gap-2 text-sm text-purple-300/70 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={expandedSearch}
-              onChange={(e) => setExpandedSearch(e.target.checked)}
-              className="rounded border-purple-700 bg-[#1a1035] accent-fuchsia-500"
-            />
-            Искать по смежным темам
-          </label>
 
           <button
             type="button"
