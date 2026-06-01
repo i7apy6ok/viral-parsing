@@ -51,7 +51,7 @@ type AudioSegment = {
   text: string;
 };
 
-type ClipMode = "sentences" | "manual";
+type ClipMode = "sentences" | "manual" | null;
 
 const MANUAL_SLOTS_PER_SENTENCE = 3;
 type ScriptLanguage = "ru" | "en" | "es";
@@ -97,7 +97,7 @@ const FOOTAGE_DEFAULTS = {
   footageGroups: [] as FootageGroup[],
   manualGroups: [] as ManualGroup[],
   customFootageQuery: "",
-  clipMode: "sentences" as const,
+  clipMode: null as ClipMode,
   mergeLoading: false,
   mergeStatus: null,
   mergeError: null,
@@ -127,7 +127,7 @@ const LANGUAGE_OPTIONS: { code: VideoLanguage; label: string }[] = [
 type Platform = "youtube" | "vk";
 type VideoType = "short" | "long";
 
-function ToggleGroup<T extends string>({
+function ToggleGroup<T extends string | null>({
   label,
   options,
   value,
@@ -2237,41 +2237,34 @@ function HomePage() {
       const chunks = getSentenceChunks(script, selectedHook);
       if (chunks.length === 0) throw new Error("Нет текста для озвучки");
 
-      const audioBuffers: ArrayBuffer[] = [];
-      for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
-        const chunk = chunks[chunkIdx];
-        setScripts((prev) => ({
-          ...prev,
-          [videoId]: {
-            ...prev[videoId],
-            voiceProgress: { current: chunkIdx + 1, total: chunks.length },
-          },
-        }));
-        const res = await fetch("/api/synthesize-voice", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: chunk }),
-        });
-        const data = (await res.json()) as {
-          error?: string;
-          audioBase64?: string;
-        };
-        if (!res.ok) {
-          throw new Error(
-            typeof data.error === "string"
-              ? data.error
-              : `Ошибка Voicer: ${res.status}`
-          );
-        }
-        if (!data.audioBase64) throw new Error("Озвучка не вернула аудио");
+      const audioBuffers = await Promise.all(
+        chunks.map(async (chunk) => {
+          const res = await fetch("/api/synthesize-voice", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: chunk }),
+          });
+          const data = (await res.json()) as {
+            error?: string;
+            audioBase64?: string;
+          };
+          if (!res.ok) {
+            throw new Error(
+              typeof data.error === "string"
+                ? data.error
+                : `Ошибка Voicer: ${res.status}`
+            );
+          }
+          if (!data.audioBase64) throw new Error("Озвучка не вернула аудио");
 
-        const binary = atob(data.audioBase64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        audioBuffers.push(bytes.buffer);
-      }
+          const binary = atob(data.audioBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          return bytes.buffer;
+        })
+      );
 
       const audioContext = new AudioContext();
       const decodedBuffers = await Promise.all(
@@ -2300,10 +2293,7 @@ function HomePage() {
       const wavBlob = audioBufferToWav(combined);
 
       // Сохраняем каждый чанк как отдельный WAV blob
-      const audioChunkBlobs = audioBuffers.map((buf) => {
-        const decoded = decodedBuffers[audioBuffers.indexOf(buf)];
-        return audioBufferToWav(decoded);
-      });
+      const audioChunkBlobs = decodedBuffers.map((buf) => audioBufferToWav(buf));
 
       const audioSegments: AudioSegment[] = [];
       let cursor = 0;
@@ -2367,7 +2357,7 @@ function HomePage() {
 
   const handleClipModeChange = (
     videoId: string,
-    clipMode: ClipMode,
+    clipMode: "sentences" | "manual",
     script: ScriptResult,
     selectedHook: number | null,
     language: ScriptLanguage
@@ -2729,10 +2719,14 @@ function HomePage() {
                         panel.data!.hooks[i]
                       )
                     }
-                    className="text-xs text-zinc-400 transition-colors hover:text-zinc-200"
+                    className={`rounded border px-2 py-0.5 text-xs transition-colors ${
+                      panel.copiedHook === i
+                        ? "border-emerald-500/50 text-emerald-400"
+                        : "border-amber-500/50 text-amber-400 hover:border-amber-400 hover:text-amber-300"
+                    }`}
                   >
                     {panel.copiedHook === i
-                      ? "Скопировано!"
+                      ? "✓ Скопировано!"
                       : "Копировать"}
                   </button>
                 </div>
@@ -2817,11 +2811,7 @@ function HomePage() {
       {panel.voiceLoading && (
         <div className="flex items-center justify-center gap-3 py-2">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-          <span className="text-xs text-zinc-400">
-            {panel.voiceProgress
-              ? `Озвучиваем ${panel.voiceProgress.current}/${panel.voiceProgress.total}…`
-              : "Подготовка…"}
-          </span>
+          <span className="text-xs text-zinc-400">Озвучиваем…</span>
         </div>
       )}
 
@@ -2857,15 +2847,16 @@ function HomePage() {
           <ToggleGroup
             label="Режим подбора футажа"
             value={panel.clipMode}
-            onChange={(mode) =>
+            onChange={(mode) => {
+              if (mode !== "sentences" && mode !== "manual") return;
               handleClipModeChange(
                 video.videoId,
                 mode,
                 panel.data!,
                 panel.selectedHook,
                 panel.language ?? "ru"
-              )
-            }
+              );
+            }}
             options={[
               { value: "sentences", label: "По предложению" },
               { value: "manual", label: "Ручной" },
@@ -2877,10 +2868,9 @@ function HomePage() {
               Видеоряд
             </h3>
 
-            {!panel.footageSearchStarted ? (
+            {panel.clipMode === null ? (
               <p className="text-xs text-zinc-500">
-                Выберите режим «По предложению» или «Ручной», чтобы подобрать
-                видеоряд.
+                Выберите режим подбора футажа выше.
               </p>
             ) : panel.clipMode === "manual" ? (
               <>
@@ -3103,51 +3093,55 @@ function HomePage() {
             </div>
               </>
             )}
+          </div>
 
-            <button
-              type="button"
-              onClick={() => void handleDownloadVideo(video.videoId)}
-              disabled={
-                panel.mergeLoading ||
-                (panel.clipMode === "manual"
-                  ? !hasManualMergeClips(
-                      panel.manualGroups,
-                      panel.audioDuration != null
-                        ? getManualSlotCalculatedDurations(
-                            panel.manualGroups,
-                            panel.audioDuration,
-                            panel.language ?? "ru"
-                          )
-                        : panel.manualGroups.map((group) =>
-                            group.slots.map(() => 0)
-                          )
-                    )
-                  : panel.footageLoading ||
-                    getSelectedFootageClips(
-                      panel.footageGroups
-                    ).length === 0)
-              }
-              className="mt-4 w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {panel.mergeLoading
-                ? panel.mergeStatus ?? "Скачиваем..."
-                : "Скачать видео"}
-            </button>
+          {panel.clipMode !== null && (
+            <>
+              <button
+                type="button"
+                onClick={() => void handleDownloadVideo(video.videoId)}
+                disabled={
+                  panel.mergeLoading ||
+                  (panel.clipMode === "manual"
+                    ? !hasManualMergeClips(
+                        panel.manualGroups,
+                        panel.audioDuration != null
+                          ? getManualSlotCalculatedDurations(
+                              panel.manualGroups,
+                              panel.audioDuration,
+                              panel.language ?? "ru"
+                            )
+                          : panel.manualGroups.map((group) =>
+                              group.slots.map(() => 0)
+                            )
+                      )
+                    : panel.footageLoading ||
+                      getSelectedFootageClips(
+                        panel.footageGroups
+                      ).length === 0)
+                }
+                className="mt-4 w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {panel.mergeLoading
+                  ? panel.mergeStatus ?? "Скачиваем..."
+                  : "Скачать видео"}
+              </button>
 
-            {panel.mergeError && (
-              <p className="mt-2 text-xs text-red-400">
-                {panel.mergeError}
-              </p>
-            )}
-
-            {panel.mergeStatus &&
-              !panel.mergeLoading &&
-              panel.mergeStatus === "Готово!" && (
-                <p className="mt-2 text-xs text-emerald-400">
-                  {panel.mergeStatus}
+              {panel.mergeError && (
+                <p className="mt-2 text-xs text-red-400">
+                  {panel.mergeError}
                 </p>
               )}
-          </div>
+
+              {panel.mergeStatus &&
+                !panel.mergeLoading &&
+                panel.mergeStatus === "Готово!" && (
+                  <p className="mt-2 text-xs text-emerald-400">
+                    {panel.mergeStatus}
+                  </p>
+                )}
+            </>
+          )}
         </>
       )}
     </div>
