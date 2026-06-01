@@ -166,8 +166,7 @@ function parseIso8601Duration(iso: string): number {
 }
 
 async function fetchVideoDetails(
-  videoIds: string[],
-  type: VideoType
+  videoIds: string[]
 ): Promise<Map<string, VideoDetails>> {
   const detailsByVideoId = new Map<string, VideoDetails>();
   const chunks = chunkIds(videoIds);
@@ -536,7 +535,7 @@ export async function POST(request: Request) {
     }
 
     const videoIds = searchItems.map((item) => item.id.videoId);
-    const videoDetailsById = await fetchVideoDetails(videoIds, type);
+    const videoDetailsById = await fetchVideoDetails(videoIds);
     console.log("videos.list всего деталей:", videoDetailsById.size);
 
     const channelIds = Array.from(
