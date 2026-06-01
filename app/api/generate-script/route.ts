@@ -456,7 +456,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ...result,
-      transcriptUsed: false, // Gemini watches video directly; no separate transcript step
+      transcriptUsed: provider === "gemini-2.5-flash",
       provider,
     });
   } catch (error: unknown) {

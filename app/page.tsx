@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  Suspense,
   useEffect,
   useRef,
   useState,
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { useSearchParams } from "next/navigation";
 import type { ScriptResult } from "./api/generate-script/route";
 import type { SearchVideoResult } from "./api/search-videos/route";
 import type {
@@ -85,6 +87,7 @@ type ScriptPanelState = {
   mergeStatus: string | null;
   mergeError: string | null;
   openFootageIndex: number | null;
+  footageSearchStarted: boolean;
 };
 
 const FOOTAGE_DEFAULTS = {
@@ -100,7 +103,26 @@ const FOOTAGE_DEFAULTS = {
   openFootageIndex: null,
   audioSegments: null,
   audioChunks: null,
+  footageSearchStarted: false,
 };
+
+const WORKSPACE_STORAGE_KEY = (videoId: string) =>
+  `viral-parsing:workspace:${videoId}`;
+
+function openVideoWorkspace(
+  video: ViralVideoResult,
+  keyword: string,
+  offer: string
+) {
+  sessionStorage.setItem(
+    WORKSPACE_STORAGE_KEY(video.videoId),
+    JSON.stringify({ video, keyword, offer })
+  );
+  const url = new URL(window.location.href);
+  url.searchParams.set("workspace", "1");
+  url.searchParams.set("v", video.videoId);
+  window.open(url.toString(), "_blank", "noopener,noreferrer");
+}
 
 const RAILWAY_MERGE_URL =
   "https://viral-parsing-production.up.railway.app/merge";
@@ -258,6 +280,64 @@ function getSentenceChunks(
   const ctaClean = stripTranslation(script.cta);
 
   return [hookClean, ...bodyChunks, ctaClean].filter(Boolean);
+}
+
+function resolveAudioChunkIndex(
+  script: ScriptResult | null | undefined,
+  selectedHook: number | null,
+  groupText: string,
+  fallbackIndex: number
+): number {
+  if (!script) return fallbackIndex;
+  const chunks = getSentenceChunks(script, selectedHook);
+  const normalized = groupText.trim();
+  let idx = chunks.findIndex((c) => c.trim() === normalized);
+  if (idx < 0) {
+    idx = chunks.findIndex((c) => stripTranslation(c).trim() === normalized);
+  }
+  return idx >= 0 ? idx : fallbackIndex;
+}
+
+function getScriptSourceLabel(data: ScriptResult): string {
+  const provider = data.provider;
+  if (
+    provider === "gemini-2.5-flash" ||
+    provider?.includes("gemini")
+  ) {
+    return "Сценарий создан на основе просмотра видео (Gemini)";
+  }
+  if (provider === "claude-sonnet-4-6") {
+    return "Сценарий по заголовку (Claude, без просмотра видео)";
+  }
+  if (provider === "groq-llama-3.3-70b") {
+    return "Сценарий по заголовку (Groq, без просмотра видео)";
+  }
+  if (data.transcriptUsed) {
+    return "Сценарий создан на основе транскрипции видео";
+  }
+  return provider
+    ? `Сценарий по заголовку (${provider})`
+    : "Сценарий создан";
+}
+
+function ChunkAudioPlayer({
+  blob,
+  className = "mt-2 h-8 w-full",
+}: {
+  blob: Blob;
+  className?: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(blob);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [blob]);
+
+  if (!url) return null;
+
+  return <audio controls src={url} className={className} />;
 }
 
 function audioBufferToWav(buffer: AudioBuffer): Blob {
@@ -1119,13 +1199,6 @@ function ManualFootageSection({
                   : group.originalText
               )}
             </p>
-            {panel.audioChunks?.[groupIndex] && (
-              <audio
-                controls
-                src={URL.createObjectURL(panel.audioChunks[groupIndex])}
-                className="h-8 w-full"
-              />
-            )}
           </div>
 
           <div
@@ -1161,6 +1234,18 @@ function ManualFootageSection({
               />
             ))}
           </div>
+          {(() => {
+            const chunkIndex = resolveAudioChunkIndex(
+              panel.data,
+              panel.selectedHook,
+              group.originalText,
+              groupIndex
+            );
+            const chunkBlob = panel.audioChunks?.[chunkIndex];
+            return chunkBlob ? (
+              <ChunkAudioPlayer blob={chunkBlob} className="mt-2 h-8 w-full" />
+            ) : null;
+          })()}
         </div>
       ))}
     </div>
@@ -1244,7 +1329,12 @@ function LazyFootageVideo({
   );
 }
 
-export default function Home() {
+function HomePage() {
+  const searchParams = useSearchParams();
+  const isWorkspace = searchParams.get("workspace") === "1";
+  const workspaceVideoId = searchParams.get("v");
+  const workspaceBootstrapped = useRef(false);
+
   const [keyword, setKeyword] = useState("");
   const [expandedSearch, setExpandedSearch] = useState(true);
   const [offer, setOffer] = useState("");
@@ -1357,11 +1447,13 @@ export default function Home() {
       },
     }));
 
-    setTimeout(() => {
-      document
-        .getElementById("script-panel")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 100);
+    if (!isWorkspace) {
+      setTimeout(() => {
+        document
+          .getElementById("script-panel")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
 
     const scriptLanguage = current?.language ?? "ru";
 
@@ -2343,10 +2435,6 @@ export default function Home() {
         };
       });
 
-      const queries = getFootageQueries(script, selectedHook);
-      if (queries.length) {
-        void loadFootageForVideo(videoId, queries);
-      }
     } catch (err) {
       setScripts((prev) => ({
         ...prev,
@@ -2378,6 +2466,7 @@ export default function Home() {
         [videoId]: {
           ...prev[videoId],
           clipMode: "manual",
+          footageSearchStarted: true,
           footageError: null,
           footageGroups: [],
           openFootageIndex: null,
@@ -2398,6 +2487,7 @@ export default function Home() {
       [videoId]: {
         ...prev[videoId],
         clipMode: "sentences",
+        footageSearchStarted: true,
         manualGroups: [],
       },
     }));
@@ -2624,10 +2714,43 @@ export default function Home() {
   }, [openVideoId]);
 
   useEffect(() => {
-    if (hasScriptPanel) {
+    if (hasScriptPanel && !isWorkspace) {
       setVideoListVisible(false);
     }
-  }, [hasScriptPanel]);
+  }, [hasScriptPanel, isWorkspace]);
+
+  useEffect(() => {
+    if (!isWorkspace || !workspaceVideoId || workspaceBootstrapped.current) {
+      return;
+    }
+    workspaceBootstrapped.current = true;
+
+    const raw = sessionStorage.getItem(WORKSPACE_STORAGE_KEY(workspaceVideoId));
+    if (!raw) {
+      setError(
+        "Не найдены данные видео. Нажмите «Создать сценарий» в списке поиска."
+      );
+      return;
+    }
+
+    try {
+      const payload = JSON.parse(raw) as {
+        video: ViralVideoResult;
+        keyword: string;
+        offer: string;
+      };
+      setVideos([payload.video]);
+      setKeyword(payload.keyword ?? "");
+      setOffer(payload.offer ?? "");
+      setOpenVideoId(workspaceVideoId);
+      setFocusedVideoId(workspaceVideoId);
+      setVideoListVisible(false);
+      setError(null);
+      void handleGenerateScript(payload.video);
+    } catch {
+      setError("Ошибка загрузки данных видео");
+    }
+  }, [isWorkspace, workspaceVideoId]);
 
   const renderScriptPanel = (video: ViralVideoResult) => {
     const panel = scripts[video.videoId];
@@ -2666,11 +2789,7 @@ export default function Home() {
   {panel?.data && !panel.loading && (
     <div className="space-y-4 text-sm">
       <p className="text-xs text-zinc-500">
-        {panel.data.provider === "gemini-2.5-flash"
-          ? "Сценарий создан на основе просмотра видео (Gemini)"
-          : panel.data.transcriptUsed
-            ? "Сценарий создан на основе транскрипции видео"
-            : `Сценарий по заголовку (${panel.data.provider ?? "fallback"})`}
+        {getScriptSourceLabel(panel.data)}
       </p>
       <div>
         <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -2861,7 +2980,12 @@ export default function Home() {
               Видеоряд
             </h3>
 
-            {panel.clipMode === "manual" ? (
+            {!panel.footageSearchStarted ? (
+              <p className="text-xs text-zinc-500">
+                Выберите режим «По предложению» или «Ручной», чтобы подобрать
+                видеоряд.
+              </p>
+            ) : panel.clipMode === "manual" ? (
               <>
                 {panel.footageLoading &&
                   panel.manualGroups.length === 0 && (
@@ -3074,43 +3198,13 @@ export default function Home() {
                     </div>
                   )}
                   {panel.audioChunks?.[queryIndex] && (
-                    <audio
-                      controls
-                      src={URL.createObjectURL(
-                        panel.audioChunks[queryIndex]
-                      )}
-                      className="mt-2 h-8 w-full"
-                    />
+                    <ChunkAudioPlayer blob={panel.audioChunks[queryIndex]} />
                   )}
                 </div>
                 );
               })}
             </div>
               </>
-            )}
-
-            {panel.clipMode === "sentences" && (
-              <input
-                type="text"
-                value={panel.customFootageQuery}
-                onChange={(e) =>
-                  setScripts((prev) => ({
-                    ...prev,
-                    [video.videoId]: {
-                      ...prev[video.videoId],
-                      customFootageQuery: e.target.value,
-                    },
-                  }))
-                }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void handleCustomFootageQuery(video.videoId);
-                  }
-                }}
-                placeholder="Свой запрос для Pexels, Enter — поиск"
-                className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
-              />
             )}
 
             <button
@@ -3173,9 +3267,24 @@ export default function Home() {
         }`}
       >
         <h1 className="mb-8 text-center text-2xl font-semibold tracking-tight sm:text-3xl">
-          Найди вирусное видео
+          {isWorkspace ? "Сценарий для видео" : "Найди вирусное видео"}
         </h1>
 
+        {isWorkspace ? (
+          <div className="space-y-4">
+            {error && (
+              <p className="text-center text-sm text-red-400">{error}</p>
+            )}
+            {activeVideo && openVideoId ? (
+              <div id="script-panel">{renderScriptPanel(activeVideo)}</div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-12">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                <p className="text-sm text-zinc-400">Генерируем сценарий…</p>
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="space-y-6">
           <input
             type="text"
@@ -3464,21 +3573,16 @@ export default function Home() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      if (openVideoId === video.videoId) {
-                        setOpenVideoId(null);
-                        setFocusedVideoId(null);
-                      } else {
-                        setOpenVideoId(video.videoId);
-                        setFocusedVideoId(video.videoId);
-                        void handleGenerateScript(video);
-                      }
-                    }}
+                    onClick={() =>
+                      openVideoWorkspace(
+                        video,
+                        keyword.trim(),
+                        offer.trim()
+                      )
+                    }
                     className="w-full rounded-md border border-zinc-600 bg-zinc-800 py-2 text-center text-sm text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-700"
                   >
-                    {openVideoId === video.videoId
-                      ? "Скрыть сценарий"
-                      : "Создать сценарий"}
+                    Создать сценарий
                   </button>
                 </div>
 
@@ -3519,7 +3623,22 @@ export default function Home() {
             </div>
           )}
         </div>
+        )}
       </main>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">
+          Загрузка…
+        </div>
+      }
+    >
+      <HomePage />
+    </Suspense>
   );
 }
