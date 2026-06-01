@@ -335,6 +335,7 @@ export async function POST(request: Request) {
         velocity: 0,
         url: `https://vk.com/video${video.owner_id}_${video.id}`,
         platform: "vk",
+        durationSeconds: 0,
       });
     }
 

@@ -75,6 +75,7 @@ export type ViralVideoResult = {
   velocity: number;
   url: string;
   platform?: "youtube" | "vk";
+  durationSeconds: number;
 };
 
 const YOUTUBE_API = "https://www.googleapis.com/youtube/v3";
@@ -170,8 +171,7 @@ async function fetchVideoDetails(
 ): Promise<Map<string, VideoDetails>> {
   const detailsByVideoId = new Map<string, VideoDetails>();
   const chunks = chunkIds(videoIds);
-  const part =
-    type === "long" ? "statistics,contentDetails" : "statistics";
+  const part = "statistics,contentDetails";
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -632,6 +632,7 @@ export async function POST(request: Request) {
         viralScore,
         velocity,
         url: `https://www.youtube.com/watch?v=${videoId}`,
+        durationSeconds: videoDetails?.durationSeconds ?? 0,
       });
     }
 
