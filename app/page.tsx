@@ -3264,7 +3264,10 @@ function HomePage() {
               { value: "viralScore", label: "Вирусность (ER)" },
               { value: "views", label: "Просмотры" },
               { value: "likes", label: "Лайки" },
-              { value: "velocity", label: "🚀 Скорость роста" },
+              {
+                value: "velocity",
+                label: "🚀 Скорость роста (По просмотрам в час)",
+              },
             ]}
           />
 
