@@ -67,6 +67,7 @@ type ScriptPanelState = {
   copiedHook: number | null;
   copiedAll: boolean;
   voiceLoading: boolean;
+  voiceProgress: { current: number; total: number } | null;
   voiceError: string | null;
   voiceAudioUrl: string | null;
   voiceAudioBlob: Blob | null;
@@ -1118,6 +1119,13 @@ function ManualFootageSection({
                   : group.originalText
               )}
             </p>
+            {panel.audioChunks?.[groupIndex] && (
+              <audio
+                controls
+                src={URL.createObjectURL(panel.audioChunks[groupIndex])}
+                className="h-8 w-full"
+              />
+            )}
           </div>
 
           <div
@@ -1339,6 +1347,7 @@ export default function Home() {
         copiedHook: null,
         copiedAll: false,
         voiceLoading: false,
+        voiceProgress: null,
         voiceError: null,
         voiceAudioUrl: null,
         voiceAudioBlob: null,
@@ -1398,6 +1407,7 @@ export default function Home() {
           copiedHook: null,
           copiedAll: false,
           voiceLoading: false,
+          voiceProgress: null,
           voiceError: null,
           voiceAudioUrl: null,
           voiceAudioBlob: null,
@@ -1418,6 +1428,7 @@ export default function Home() {
           copiedHook: null,
           copiedAll: false,
           voiceLoading: false,
+          voiceProgress: null,
           voiceError: null,
           voiceAudioUrl: null,
           voiceAudioBlob: null,
@@ -2208,6 +2219,7 @@ export default function Home() {
       [videoId]: {
         ...prev[videoId],
         voiceLoading: true,
+        voiceProgress: null,
         voiceError: null,
         voiceAudioUrl: null,
         voiceAudioBlob: null,
@@ -2222,7 +2234,15 @@ export default function Home() {
       if (chunks.length === 0) throw new Error("Нет текста для озвучки");
 
       const audioBuffers: ArrayBuffer[] = [];
-      for (const chunk of chunks) {
+      for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+        const chunk = chunks[chunkIdx];
+        setScripts((prev) => ({
+          ...prev,
+          [videoId]: {
+            ...prev[videoId],
+            voiceProgress: { current: chunkIdx + 1, total: chunks.length },
+          },
+        }));
         const res = await fetch("/api/synthesize-voice", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2311,6 +2331,7 @@ export default function Home() {
           [videoId]: {
             ...panel,
             voiceLoading: false,
+            voiceProgress: null,
             voiceError: null,
             voiceAudioUrl: audioUrl,
             voiceAudioBlob: wavBlob,
@@ -2332,6 +2353,7 @@ export default function Home() {
         [videoId]: {
           ...prev[videoId],
           voiceLoading: false,
+          voiceProgress: null,
           voiceError:
             err instanceof Error ? err.message : "Ошибка озвучки",
           voiceAudioUrl: null,
@@ -2644,9 +2666,11 @@ export default function Home() {
   {panel?.data && !panel.loading && (
     <div className="space-y-4 text-sm">
       <p className="text-xs text-zinc-500">
-        {panel.data.transcriptUsed
-          ? "Сценарий создан на основе транскрипции видео"
-          : "Транскрипция недоступна — сценарий по заголовку"}
+        {panel.data.provider === "gemini-2.5-flash"
+          ? "Сценарий создан на основе просмотра видео (Gemini)"
+          : panel.data.transcriptUsed
+            ? "Сценарий создан на основе транскрипции видео"
+            : `Сценарий по заголовку (${panel.data.provider ?? "fallback"})`}
       </p>
       <div>
         <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -2775,8 +2799,13 @@ export default function Home() {
       </button>
 
       {panel.voiceLoading && (
-        <div className="flex justify-center py-2">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+        <div className="flex items-center justify-center gap-3 py-2">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+          <span className="text-xs text-zinc-400">
+            {panel.voiceProgress
+              ? `Озвучиваем ${panel.voiceProgress.current}/${panel.voiceProgress.total}…`
+              : "Подготовка…"}
+          </span>
         </div>
       )}
 
@@ -3060,27 +3089,29 @@ export default function Home() {
               </>
             )}
 
-            <input
-              type="text"
-              value={panel.customFootageQuery}
-              onChange={(e) =>
-                setScripts((prev) => ({
-                  ...prev,
-                  [video.videoId]: {
-                    ...prev[video.videoId],
-                    customFootageQuery: e.target.value,
-                  },
-                }))
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleCustomFootageQuery(video.videoId);
+            {panel.clipMode === "sentences" && (
+              <input
+                type="text"
+                value={panel.customFootageQuery}
+                onChange={(e) =>
+                  setScripts((prev) => ({
+                    ...prev,
+                    [video.videoId]: {
+                      ...prev[video.videoId],
+                      customFootageQuery: e.target.value,
+                    },
+                  }))
                 }
-              }}
-              placeholder="Свой запрос для Pexels, Enter — поиск"
-              className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
-            />
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleCustomFootageQuery(video.videoId);
+                  }
+                }}
+                placeholder="Свой запрос для Pexels, Enter — поиск"
+                className="mt-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+              />
+            )}
 
             <button
               type="button"
@@ -3417,6 +3448,7 @@ export default function Home() {
                             copiedHook: null,
                             copiedAll: false,
                             voiceLoading: false,
+                            voiceProgress: null,
                             voiceError: null,
                             voiceAudioUrl: null,
                             voiceAudioBlob: null,
