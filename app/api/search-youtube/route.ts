@@ -78,6 +78,14 @@ export type ViralVideoResult = {
 };
 
 const YOUTUBE_API = "https://www.googleapis.com/youtube/v3";
+const YOUTUBE_API_KEYS = [
+  process.env.YOUTUBE_API_KEY,
+  process.env.YOUTUBE_API_KEY_2,
+  process.env.YOUTUBE_API_KEY_3,
+].filter(Boolean) as string[];
+
+let currentKeyIndex = 0;
+
 const DEFAULT_MIN_VIEWS = 1000;
 const YOUTUBE_ID_CHUNK_SIZE = 50;
 const MIN_LONG_DURATION_SECONDS = 4 * 60;
@@ -117,35 +125,62 @@ async function fetchYouTube<T>(
   path: string,
   params: Record<string, string>
 ): Promise<T> {
+  if (YOUTUBE_API_KEYS.length === 0) {
+    throw new Error("Нет доступных YouTube API ключей");
+  }
+
   try {
-    const apiKey = process.env.YOUTUBE_API_KEY;
-    if (!apiKey) {
-      throw new Error("YOUTUBE_API_KEY is not configured");
+    while (currentKeyIndex < YOUTUBE_API_KEYS.length) {
+      const apiKey = YOUTUBE_API_KEYS[currentKeyIndex];
+      if (!apiKey) {
+        throw new Error("Нет доступных YouTube API ключей");
+      }
+
+      const url = new URL(`${YOUTUBE_API}/${path}`);
+      for (const [key, value] of Object.entries(params)) {
+        url.searchParams.set(key, value);
+      }
+      url.searchParams.set("key", apiKey);
+
+      const res = await fetch(url.toString());
+      const data = await res.json();
+
+      if (!res.ok) {
+        const message =
+          typeof data?.error?.message === "string"
+            ? data.error.message
+            : "YouTube API request failed";
+        const isQuotaExceeded =
+          res.status === 403 && message.toLowerCase().includes("quota");
+
+        if (isQuotaExceeded) {
+          console.warn(
+            `YouTube API [${path}] quota exceeded on key #${currentKeyIndex + 1}, rotating...`
+          );
+          currentKeyIndex++;
+          if (currentKeyIndex >= YOUTUBE_API_KEYS.length) {
+            throw new Error(
+              "Квота YouTube API исчерпана на всех ключах. Попробуйте завтра."
+            );
+          }
+          continue;
+        }
+
+        console.error(`YouTube API [${path}] HTTP ${res.status}:`, {
+          params,
+          keyIndex: currentKeyIndex,
+          error: data?.error ?? data,
+          message,
+        });
+        throw new Error(message);
+      }
+
+      return data as T;
     }
 
-    const url = new URL(`${YOUTUBE_API}/${path}`);
-    for (const [key, value] of Object.entries(params)) {
-      url.searchParams.set(key, value);
-    }
-    url.searchParams.set("key", apiKey);
-
-    const res = await fetch(url.toString());
-    const data = await res.json();
-
-    if (!res.ok) {
-      const message =
-        typeof data?.error?.message === "string"
-          ? data.error.message
-          : "YouTube API request failed";
-      console.error(`YouTube API [${path}] HTTP ${res.status}:`, {
-        params,
-        error: data?.error ?? data,
-        message,
-      });
-      throw new Error(message);
-    }
-
-    return data as T;
+    throw new Error(
+      "Квота YouTube API исчерпана на всех ключах. Попробуйте завтра."
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`YouTube API [${path}] failed:`, message);
