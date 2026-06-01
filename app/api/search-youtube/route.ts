@@ -128,6 +128,7 @@ async function fetchYouTube<T>(
   }
 
   for (const apiKey of keys) {
+    console.log("Using API key ending:", apiKey.slice(-6));
     const url = new URL(`${YOUTUBE_API}/${path}`);
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
