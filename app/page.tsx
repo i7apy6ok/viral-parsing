@@ -104,6 +104,7 @@ const FOOTAGE_DEFAULTS = {
 const RAILWAY_MERGE_URL =
   "https://viral-parsing-production.up.railway.app/merge";
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function proxyUrl(url: string): string {
   return `/api/proxy?url=${encodeURIComponent(url)}`;
 }
@@ -227,6 +228,7 @@ function getPreservedTranslation(text: string): string | null {
   return translations.length > 0 ? translations[translations.length - 1]! : null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function formatVoiceScript(
   script: ScriptResult,
   selectedHook: number | null
