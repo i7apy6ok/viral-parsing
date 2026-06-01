@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 type VideoType = "short" | "long";
 export type Period = "7d" | "14d" | "30d" | "90d" | "all";
-export type SortBy = "viralScore" | "views" | "likes";
+export type SortBy = "viralScore" | "views" | "likes" | "velocity";
 
 export type VideoLanguage = "ru" | "en" | "es";
 
@@ -25,6 +25,7 @@ type YouTubeSearchItem = {
     title: string;
     channelId: string;
     channelTitle: string;
+    publishedAt?: string;
     thumbnails: {
       medium?: { url: string };
       high?: { url: string };
@@ -71,6 +72,7 @@ export type ViralVideoResult = {
   channelTitle: string;
   channelAge: string;
   viralScore: number;
+  velocity: number;
   url: string;
   platform?: "youtube" | "vk";
 };
@@ -88,7 +90,7 @@ const PERIOD_DAYS: Record<Exclude<Period, "all">, number> = {
 };
 
 const VALID_PERIODS: Period[] = ["7d", "14d", "30d", "90d", "all"];
-const VALID_SORT: SortBy[] = ["viralScore", "views", "likes"];
+const VALID_SORT: SortBy[] = ["viralScore", "views", "likes", "velocity"];
 const VALID_LANGUAGES: VideoLanguage[] = ["ru", "en", "es"];
 
 const LANGUAGE_TO_REGION: Record<VideoLanguage, string> = {
@@ -376,6 +378,7 @@ function sortResults(results: ViralVideoResult[], sortBy: SortBy): void {
     viralScore: (a, b) => b.viralScore - a.viralScore,
     views: (a, b) => b.viewCount - a.viewCount,
     likes: (a, b) => b.likeCount - a.likeCount,
+    velocity: (a, b) => b.velocity - a.velocity,
   };
   results.sort(comparators[sortBy]);
 }
@@ -612,6 +615,13 @@ export async function POST(request: Request) {
           : viewCount / (subscriberCount + 1);
       const viralScore = viralMultiplier;
 
+      const publishedAt = item.snippet.publishedAt;
+      const hoursAgo = publishedAt
+        ? (Date.now() - new Date(publishedAt).getTime()) / 3600000
+        : 0;
+      const velocity =
+        hoursAgo > 0 ? Math.round(viewCount / hoursAgo) : 0;
+
       afterChannelFilter.push({
         videoId,
         title: item.snippet.title,
@@ -622,6 +632,7 @@ export async function POST(request: Request) {
         channelTitle: item.snippet.channelTitle,
         channelAge: formatChannelAge(channelCreatedAt),
         viralScore,
+        velocity,
         url: `https://www.youtube.com/watch?v=${videoId}`,
       });
     }

@@ -153,6 +153,7 @@ function sortResults(results: ViralVideoResult[], sortBy: SortBy): void {
     viralScore: (a, b) => b.viralScore - a.viralScore,
     views: (a, b) => b.viewCount - a.viewCount,
     likes: (a, b) => b.likeCount - a.likeCount,
+    velocity: (a, b) => b.velocity - a.velocity,
   };
   results.sort(comparators[sortBy]);
 }
@@ -331,6 +332,7 @@ export async function POST(request: Request) {
         channelTitle: owner.title,
         channelAge: formatChannelAge(owner.registeredAt),
         viralScore,
+        velocity: 0,
         url: `https://vk.com/video${video.owner_id}_${video.id}`,
         platform: "vk",
       });

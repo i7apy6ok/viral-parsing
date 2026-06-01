@@ -3264,6 +3264,7 @@ function HomePage() {
               { value: "viralScore", label: "Вирусность (ER)" },
               { value: "views", label: "Просмотры" },
               { value: "likes", label: "Лайки" },
+              { value: "velocity", label: "🚀 Скорость роста" },
             ]}
           />
 
@@ -3405,6 +3406,11 @@ function HomePage() {
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-purple-300/70">
                     <span>{formatNumber(video.viewCount)} просм.</span>
                     <span>{formatNumber(video.likeCount)} лайков</span>
+                    {video.velocity > 0 && (
+                      <span>
+                        {formatNumber(video.velocity)} просм/час
+                      </span>
+                    )}
                     {video.repostCount != null && (
                       <span>{formatNumber(video.repostCount)} реп.</span>
                     )}
