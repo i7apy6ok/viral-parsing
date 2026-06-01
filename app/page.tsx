@@ -1450,6 +1450,7 @@ function HomePage() {
           niche: keyword.trim(),
           offer: offer.trim(),
           language: scriptLanguage,
+          videoType: type,
         }),
       });
 

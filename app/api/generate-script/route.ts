@@ -4,12 +4,15 @@ export const maxDuration = 120;
 
 type ScriptLanguage = "ru" | "en" | "es";
 
+type VideoType = "short" | "long";
+
 type GenerateScriptBody = {
   videoId: string;
   title: string;
   niche: string;
   offer?: string;
   language?: ScriptLanguage;
+  videoType?: VideoType;
 };
 
 export type ScriptResult = {
@@ -147,7 +150,8 @@ function buildPrompt(
   title: string,
   offer?: string,
   language: ScriptLanguage = "ru",
-  transcript?: string
+  transcript?: string,
+  videoType: VideoType = "short"
 ): string {
   const offerTrimmed = offer?.trim() ?? "";
   const ctaInstruction = offerTrimmed
@@ -162,16 +166,35 @@ function buildPrompt(
     ? "Используй транскрипт выше для создания сценария."
     : "Посмотри видео выше и создай адаптированный сценарий.";
 
-  return `Ты эксперт по вирусному контенту для русскоязычной аудитории.
+  const isLong = videoType === "long";
 
-Пиши живым разговорным языком, избегай канцелярита и очевидных ИИ-шных фраз. Текст должен звучать как живой человек говорит на камеру.
+  const formatInstruction = isLong
+    ? `Создай полноценный сценарий для длинного YouTube видео (8-15 минут, примерно 102-123% от длины оригинала).`
+    : `Создай адаптированный сценарий для короткого видео (30-60 сек).`;
 
-Тема ниши: ${niche}
-Название оригинального видео: ${title}
-${transcriptBlock}
-${videoInstruction} Создай адаптированный сценарий для короткого видео (30-60 сек):
+  const structureInstruction = isLong
+    ? `1. ТРИ ВАРИАНТА ХУКА (первые 15-30 секунд):
+Хук 1 (Провокация + обещание): ...
+Хук 2 (Боль/проблема + интрига): ...
+Хук 3 (Шокирующий факт + вопрос): ...
 
-1. ТРИ ВАРИАНТА ХУКА (первые 3 секунды):
+2. ОСНОВНАЯ ЧАСТЬ (7-12 минут):
+Подробное раскрытие темы с примерами, историями, фактами. Несколько логических блоков с переходами. Каждый блок — отдельный абзац. Минимум 500 слов.
+
+3. CTA (призыв к действию, 30-60 сек):
+${ctaInstruction}
+
+4. ВИЗУАЛЬНЫЙ ХУК:
+Что показать в первый кадр (без лица, текст на экране).
+
+5. ПОИСКОВЫЕ ЗАПРОСЫ ДЛЯ PEXELS (на английском):
+15-25 коротких запросов, по одному на каждый смысловой блок. Формулируй конкретно и визуально. Пример: "woman looking at scale disappointed", "healthy food close up".
+
+6. ПРЕДЛОЖЕНИЯ (sentences):
+Разбей основную часть (body) на отдельные предложения для озвучки по одному.
+Каждый элемент массива sentences — ровно одно предложение, не больше.
+Важно: sentences используются для TTS-озвучки по чанкам, поэтому не склеивай предложения вместе.`
+    : `1. ТРИ ВАРИАНТА ХУКА (первые 3 секунды):
 Хук 1 (Провокация): ...
 Хук 2 (Боль/проблема): ...
 Хук 3 (Интрига/вопрос): ...
@@ -191,7 +214,18 @@ ${ctaInstruction}
 6. ПРЕДЛОЖЕНИЯ (sentences):
 Разбей основную часть (body) на отдельные предложения для озвучки по одному.
 Каждый элемент массива sentences — ровно одно предложение, не больше.
-Важно: sentences используются для TTS-озвучки по чанкам, поэтому не склеивай предложения вместе.
+Важно: sentences используются для TTS-озвучки по чанкам, поэтому не склеивай предложения вместе.`;
+
+  return `Ты эксперт по вирусному контенту для русскоязычной аудитории.
+
+Пиши живым разговорным языком, избегай канцелярита и очевидных ИИ-шных фраз. Текст должен звучать как живой человек говорит на камеру.
+
+Тема ниши: ${niche}
+Название оригинального видео: ${title}
+${transcriptBlock}
+${videoInstruction} ${formatInstruction}
+
+${structureInstruction}
 ${
   language !== "ru"
     ? `
@@ -584,13 +618,21 @@ async function generateScript(
   niche: string,
   title: string,
   offer: string | undefined,
-  language: ScriptLanguage
+  language: ScriptLanguage,
+  videoType: VideoType = "short"
 ): Promise<{
   result: Omit<ScriptResult, "transcriptUsed" | "provider">;
   provider: string;
 }> {
   // Build prompt without transcript (for video-url path)
-  const promptNoTranscript = buildPrompt(niche, title, offer, language);
+  const promptNoTranscript = buildPrompt(
+    niche,
+    title,
+    offer,
+    language,
+    undefined,
+    videoType
+  );
 
   // 1. Gemini + video_url
   if (process.env.OPENROUTER_API_KEY) {
@@ -615,7 +657,8 @@ async function generateScript(
     title,
     offer,
     language,
-    transcript ?? undefined
+    transcript ?? undefined,
+    videoType
   );
 
   // 2. Gemini + transcript
@@ -664,7 +707,14 @@ async function generateScript(
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Partial<GenerateScriptBody>;
-    const { videoId, title, niche, offer, language: rawLanguage } = body;
+    const {
+      videoId,
+      title,
+      niche,
+      offer,
+      language: rawLanguage,
+      videoType = "short",
+    } = body;
     const language = normalizeLanguage(rawLanguage);
 
     if (!videoId?.trim()) {
@@ -686,7 +736,8 @@ export async function POST(request: Request) {
       niche.trim(),
       title.trim(),
       offer,
-      language
+      language,
+      videoType
     );
 
     return NextResponse.json({
