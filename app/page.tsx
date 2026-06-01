@@ -140,8 +140,8 @@ function ToggleGroup<T extends string | null>({
 }) {
   return (
     <div className="space-y-2">
-      <span className="text-sm text-zinc-400">{label}</span>
-      <div className="flex rounded-lg border border-zinc-800 bg-zinc-900/50 p-1">
+      <span className="text-sm text-purple-300/70">{label}</span>
+      <div className="flex rounded-lg border border-purple-900/50 bg-[#1a1035]/80 p-1">
         {options.map((option) => (
           <button
             key={option.value}
@@ -150,7 +150,7 @@ function ToggleGroup<T extends string | null>({
             className={`flex-1 rounded-md px-3 py-2 text-sm transition-colors ${
               value === option.value
                 ? "bg-zinc-700 text-white"
-                : "text-zinc-400 hover:text-zinc-200"
+                : "text-purple-300/70 hover:text-zinc-200"
             }`}
           >
             {option.label}
@@ -174,11 +174,11 @@ function SelectField<T extends string>({
 }) {
   return (
     <div className="space-y-2">
-      <label className="text-sm text-zinc-400">{label}</label>
+      <label className="text-sm text-purple-300/70">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
-        className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+        className="w-full rounded-lg border border-purple-900/50 bg-[#1a1035] px-4 py-3 text-sm text-purple-50 outline-none transition-colors focus:border-purple-700 focus:ring-1 focus:ring-zinc-600"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -435,7 +435,7 @@ function combineWithTranslation(
 }
 
 const SCRIPT_TEXTAREA_CLASS =
-  "w-full resize-none overflow-hidden rounded-lg border border-transparent bg-zinc-900 px-3 py-2 text-sm leading-relaxed text-zinc-100 outline-none transition-colors placeholder:text-zinc-500 focus:border-zinc-600";
+  "w-full resize-none overflow-hidden rounded-lg border border-transparent bg-[#1a1035] px-3 py-2 text-sm leading-relaxed text-purple-50 outline-none transition-colors placeholder:text-purple-400/50 focus:border-purple-700";
 
 const TRANSLATION_BLOCK_STYLE = {
   color: "#888",
@@ -915,7 +915,7 @@ function FootageQueryInput({
               }
             : undefined
         }
-        className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+        className="min-w-0 flex-1 rounded-lg border border-purple-900/50 bg-[#1a1035] px-2 text-xs text-purple-50 placeholder:text-purple-400/50 outline-none transition-colors focus:border-purple-700"
         style={{ height: "32px", boxSizing: "border-box" }}
         placeholder="Свой запрос в Стоки"
       />
@@ -924,7 +924,7 @@ function FootageQueryInput({
         title="Найти другое"
         disabled={disabled}
         onClick={() => runSearch()}
-        className="shrink-0 rounded-lg border border-zinc-700 px-2.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+        className="shrink-0 rounded-lg border border-purple-800/60 px-2.5 text-xs text-purple-200 transition-colors hover:border-purple-600 hover:bg-purple-800/60 disabled:opacity-50"
         style={{ height: "32px", boxSizing: "border-box" }}
       >
         🔄
@@ -941,13 +941,13 @@ function FootageDurationLabel({
   estimatedDuration: number | null;
 }) {
   if (estimatedDuration == null) {
-    return <p className="text-xs text-zinc-500">{pexelsDuration} сек</p>;
+    return <p className="text-xs text-purple-400/50">{pexelsDuration} сек</p>;
   }
 
   return (
     <p className="text-xs">
-      <span className="text-zinc-500">{pexelsDuration} сек</span>
-      <span className="text-zinc-500"> → </span>
+      <span className="text-purple-400/50">{pexelsDuration} сек</span>
+      <span className="text-purple-400/50"> → </span>
       <span className="text-green-400">{estimatedDuration} сек</span>
     </p>
   );
@@ -978,7 +978,7 @@ function ManualSlotDurationInput({
           }
         }}
         style={{ width: "60px" }}
-        className="rounded border border-green-800/60 bg-zinc-900 px-1.5 py-0.5 text-green-400 outline-none focus:border-green-600"
+        className="rounded border border-green-800/60 bg-[#1a1035] px-1.5 py-0.5 text-green-400 outline-none focus:border-green-600"
       />
       <span className="text-green-400">сек</span>
     </label>
@@ -1023,7 +1023,7 @@ function ManualFootageQueryInput({
               runSearch();
             }
           }}
-          className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600"
+          className="min-w-0 flex-1 rounded-lg border border-purple-900/50 bg-[#1a1035] px-2 text-xs text-purple-50 placeholder:text-purple-400/50 outline-none transition-colors focus:border-purple-700"
           style={{ height: "32px", boxSizing: "border-box" }}
           placeholder="Свой запрос в Стоки"
         />
@@ -1032,7 +1032,7 @@ function ManualFootageQueryInput({
           title="Найти другое"
           disabled={loading}
           onClick={runSearch}
-          className="shrink-0 rounded-lg border border-zinc-700 px-2.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+          className="shrink-0 rounded-lg border border-purple-800/60 px-2.5 text-xs text-purple-200 transition-colors hover:border-purple-600 hover:bg-purple-800/60 disabled:opacity-50"
           style={{ height: "32px", boxSizing: "border-box" }}
         >
           🔄
@@ -1079,10 +1079,10 @@ function ManualFootageSlot({
 
       {slot.loading ? (
         <div className="flex justify-center py-6">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
         </div>
       ) : !activeVideo ? (
-        <p className="text-[10px] text-zinc-500">Видео не найдены</p>
+        <p className="text-[10px] text-purple-400/50">Видео не найдены</p>
       ) : (
         <div className="space-y-1.5">
           <video
@@ -1117,7 +1117,7 @@ function ManualFootageSlot({
             <button
               type="button"
               onClick={onCycleVideo}
-              className="w-full rounded-md border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+              className="w-full rounded-md border border-purple-800/60 px-2 py-1 text-[10px] text-purple-200 transition-colors hover:border-purple-600 hover:bg-purple-800/60"
             >
               Другой
             </button>
@@ -1170,7 +1170,7 @@ function ManualFootageSection({
       : null;
 
   if (panel.manualGroups.length === 0) {
-    return <p className="text-xs text-zinc-500">Нет предложений в сценарии</p>;
+    return <p className="text-xs text-purple-400/50">Нет предложений в сценарии</p>;
   }
 
   return (
@@ -1178,7 +1178,7 @@ function ManualFootageSection({
       {panel.manualGroups.map((group, groupIndex) => (
         <div key={`${group.originalText}-${groupIndex}`} className="space-y-2">
           <div className="space-y-1">
-            <p className="text-xs font-bold leading-snug text-zinc-100">
+            <p className="text-xs font-bold leading-snug text-purple-50">
               {renderWithTranslation(
                 group.translation
                   ? `${group.originalText} (${group.translation})`
@@ -1289,7 +1289,7 @@ function LazyFootageVideo({
   return (
     <div
       ref={containerRef}
-      className="mx-auto max-w-[180px] overflow-hidden rounded-lg border border-zinc-700"
+      className="mx-auto max-w-[180px] overflow-hidden rounded-lg border border-purple-800/60"
     >
       {isVisible ? (
         <video
@@ -1301,14 +1301,14 @@ function LazyFootageVideo({
           loop
           playsInline
           preload="none"
-          className="aspect-[9/16] w-full bg-zinc-900 object-cover"
+          className="aspect-[9/16] w-full bg-[#1a1035] object-cover"
         />
       ) : (
         <img
           src={poster}
           alt=""
           loading="lazy"
-          className="aspect-[9/16] w-full bg-zinc-900 object-cover"
+          className="aspect-[9/16] w-full bg-[#1a1035] object-cover"
         />
       )}
     </div>
@@ -2659,11 +2659,11 @@ function HomePage() {
         : null;
 
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-4">
+      <div className="rounded-lg border border-purple-900/50 bg-[#0f0a1e]/80 p-4">
   {(!panel || panel.loading) && (
     <div className="flex items-center justify-center gap-3 py-6">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-      <span className="text-sm text-zinc-400">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
+      <span className="text-sm text-purple-300/70">
         Генерируем сценарий…
       </span>
     </div>
@@ -2675,11 +2675,11 @@ function HomePage() {
 
   {panel?.data && !panel.loading && (
     <div className="space-y-4 text-sm">
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-purple-400/50">
         {getScriptSourceLabel(panel.data)}
       </p>
       <div>
-        <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-purple-400/50">
           Хуки — выбери ✓ и нажми, чтобы скопировать
         </h3>
         <div className="space-y-2">
@@ -2689,8 +2689,8 @@ function HomePage() {
                 key={i}
                 className={`rounded-lg border px-3 py-2 transition-colors ${
                   panel.selectedHook === i
-                    ? "border-amber-500/60 bg-zinc-800"
-                    : "border-zinc-700 bg-zinc-900"
+                    ? "border-fuchsia-500/60 bg-[#231448]"
+                    : "border-purple-800/60 bg-[#1a1035]"
                 }`}
               >
                 <div className="mb-2 flex items-center justify-between gap-2">
@@ -2705,7 +2705,7 @@ function HomePage() {
                         },
                       }))
                     }
-                    className="text-xs text-amber-400/80 transition-colors hover:text-amber-300"
+                    className="text-xs text-fuchsia-400/80 transition-colors hover:text-fuchsia-300"
                   >
                     {panel.selectedHook === i ? "✓ " : ""}
                     Хук {i + 1}
@@ -2722,7 +2722,7 @@ function HomePage() {
                     className={`rounded border px-2 py-0.5 text-xs transition-colors ${
                       panel.copiedHook === i
                         ? "border-emerald-500/50 text-emerald-400"
-                        : "border-amber-500/50 text-amber-400 hover:border-amber-400 hover:text-amber-300"
+                        : "border-fuchsia-500/50 text-fuchsia-400 hover:border-fuchsia-400 hover:text-fuchsia-300"
                     }`}
                   >
                     {panel.copiedHook === i
@@ -2750,7 +2750,7 @@ function HomePage() {
       </div>
 
       <div>
-        <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-purple-400/50">
           Основная часть
         </h3>
         <ScriptEditableTextarea
@@ -2764,7 +2764,7 @@ function HomePage() {
       </div>
 
       <div>
-        <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-purple-400/50">
           CTA
         </h3>
         <ScriptEditableTextarea
@@ -2786,7 +2786,7 @@ function HomePage() {
             panel.selectedHook
           )
         }
-        className="w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white"
+        className="w-full rounded-md bg-gradient-to-r from-violet-600 to-purple-600 py-2 text-sm font-medium text-white transition-colors hover:from-violet-500 hover:to-purple-500"
       >
         {panel.copiedAll ? "Скопировано!" : "Скопировать всё"}
       </button>
@@ -2801,7 +2801,7 @@ function HomePage() {
           )
         }
         disabled={panel.voiceLoading}
-        className="w-full rounded-md border border-zinc-600 bg-zinc-800 py-2 text-sm text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-700 disabled:opacity-60"
+        className="w-full rounded-md border border-purple-700 bg-purple-900/60 py-2 text-sm text-purple-50 transition-colors hover:border-purple-600 hover:bg-purple-800/60 disabled:opacity-60"
       >
         {panel.voiceLoading
           ? "Озвучиваем…"
@@ -2810,8 +2810,8 @@ function HomePage() {
 
       {panel.voiceLoading && (
         <div className="flex items-center justify-center gap-3 py-2">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-          <span className="text-xs text-zinc-400">Озвучиваем…</span>
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
+          <span className="text-xs text-purple-300/70">Озвучиваем…</span>
         </div>
       )}
 
@@ -2864,12 +2864,12 @@ function HomePage() {
           />
 
           <div>
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-purple-400/50">
               Видеоряд
             </h3>
 
             {panel.clipMode === null ? (
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-purple-400/50">
                 Выберите режим подбора футажа выше.
               </p>
             ) : panel.clipMode === "manual" ? (
@@ -2877,8 +2877,8 @@ function HomePage() {
                 {panel.footageLoading &&
                   panel.manualGroups.length === 0 && (
                     <div className="mb-3 flex items-center gap-2 py-2">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                      <span className="text-xs text-zinc-400">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
+                      <span className="text-xs text-purple-300/70">
                         Ищем видео на Pexels…
                       </span>
                     </div>
@@ -2942,8 +2942,8 @@ function HomePage() {
             {panel.footageLoading &&
               panel.footageGroups.length === 0 && (
                 <div className="flex items-center gap-2 py-3">
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                  <span className="text-xs text-zinc-400">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
+                  <span className="text-xs text-purple-300/70">
                     Ищем видео на Pexels…
                   </span>
                 </div>
@@ -2996,7 +2996,7 @@ function HomePage() {
                   key={`${group.originalQuery}-${queryIndex}`}
                 >
                   <div className="mb-2 space-y-1">
-                    <p className="text-xs leading-snug text-zinc-300">
+                    <p className="text-xs leading-snug text-purple-200">
                       {renderWithTranslation(displayText)}
                     </p>
                     <FootageQueryInput
@@ -3026,10 +3026,10 @@ function HomePage() {
 
                   {group.loading ? (
                     <div className="flex justify-center py-4">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
                     </div>
                   ) : !activeVideo ? (
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-purple-400/50">
                       Видео не найдены
                     </p>
                   ) : queryIndex === panel.openFootageIndex ? (
@@ -3053,7 +3053,7 @@ function HomePage() {
                               queryIndex
                             )
                           }
-                          className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                          className="rounded-md border border-purple-800/60 px-3 py-1.5 text-xs text-purple-200 transition-colors hover:border-purple-600 hover:bg-purple-800/60"
                         >
                           Подобрать другой фрагмент
                         </button>
@@ -3074,7 +3074,7 @@ function HomePage() {
                             },
                           }))
                         }
-                        className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-zinc-700 object-cover opacity-60 transition-opacity hover:opacity-100"
+                        className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-purple-800/60 object-cover opacity-60 transition-opacity hover:opacity-100"
                       />
                       <FootageDurationLabel
                         pexelsDuration={activeVideo.duration}
@@ -3120,7 +3120,7 @@ function HomePage() {
                         panel.footageGroups
                       ).length === 0)
                 }
-                className="mt-4 w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-4 w-full rounded-md bg-gradient-to-r from-violet-600 to-purple-600 py-2 text-sm font-medium text-white transition-colors hover:from-violet-500 hover:to-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {panel.mergeLoading
                   ? panel.mergeStatus ?? "Скачиваем..."
@@ -3151,9 +3151,21 @@ function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div
+      className="min-h-screen bg-[#0f0a1e] text-purple-50"
+      style={{
+        backgroundImage:
+          "radial-gradient(ellipse at top, #2d1b69 0%, #0f0a1e 60%)",
+      }}
+    >
       <main className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
-        <h1 className="mb-8 text-center text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h1
+          className={`mb-8 text-center text-2xl font-semibold tracking-tight sm:text-3xl ${
+            isWorkspace
+              ? "text-purple-50"
+              : "bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent"
+          }`}
+        >
           {isWorkspace ? "Сценарий для видео" : "Найди вирусное видео"}
         </h1>
 
@@ -3166,8 +3178,8 @@ function HomePage() {
               <div id="script-panel">{renderScriptPanel(activeVideo)}</div>
             ) : (
               <div className="flex flex-col items-center gap-3 py-12">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
-                <p className="text-sm text-zinc-400">Генерируем сценарий…</p>
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
+                <p className="text-sm text-purple-300/70">Генерируем сценарий…</p>
               </div>
             )}
           </div>
@@ -3181,11 +3193,11 @@ function HomePage() {
               if (e.key === "Enter") handleSearch();
             }}
             placeholder="Введи нишу, например: менопауза диета"
-            className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+            className="w-full rounded-lg border border-purple-900/50 bg-[#1a1035] px-4 py-3 text-purple-50 placeholder:text-purple-400/50 outline-none transition-colors focus:border-purple-700 focus:ring-1 focus:ring-zinc-600"
           />
 
           <div className="space-y-2">
-            <label className="text-sm text-zinc-400">
+            <label className="text-sm text-purple-300/70">
               Ваш оффер (необязательно)
             </label>
             <textarea
@@ -3193,7 +3205,7 @@ function HomePage() {
               onChange={(e) => setOffer(e.target.value)}
               rows={2}
               placeholder='Например: электронная книга "Диета при менопаузе" за 390₽'
-              className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+              className="w-full resize-none rounded-lg border border-purple-900/50 bg-[#1a1035] px-4 py-3 text-sm text-purple-50 placeholder:text-purple-400/50 outline-none transition-colors focus:border-purple-700 focus:ring-1 focus:ring-zinc-600"
             />
           </div>
 
@@ -3231,7 +3243,7 @@ function HomePage() {
           />
 
           <div className="space-y-2">
-            <label className="text-sm text-zinc-400">Мин. просмотров</label>
+            <label className="text-sm text-purple-300/70">Мин. просмотров</label>
             <input
               type="number"
               min={0}
@@ -3240,7 +3252,7 @@ function HomePage() {
               onChange={(e) =>
                 setMinViews(Math.max(0, Number(e.target.value) || 0))
               }
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-zinc-100 outline-none transition-colors focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+              className="w-full rounded-lg border border-purple-900/50 bg-[#1a1035] px-4 py-3 text-purple-50 outline-none transition-colors focus:border-purple-700 focus:ring-1 focus:ring-zinc-600"
             />
           </div>
 
@@ -3256,11 +3268,11 @@ function HomePage() {
           />
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span className="shrink-0 text-sm text-zinc-400">Язык:</span>
+            <span className="shrink-0 text-sm text-purple-300/70">Язык:</span>
             {LANGUAGE_OPTIONS.map(({ code, label }) => (
               <label
                 key={code}
-                className="flex cursor-pointer items-center gap-1.5 text-sm text-zinc-300"
+                className="flex cursor-pointer items-center gap-1.5 text-sm text-purple-200"
               >
                 <input
                   type="checkbox"
@@ -3268,7 +3280,7 @@ function HomePage() {
                   onChange={() =>
                     setLanguages((prev) => toggleLanguage(prev, code))
                   }
-                  className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 accent-zinc-400"
+                  className="h-3.5 w-3.5 rounded border-purple-800/60 bg-[#1a1035] accent-zinc-400"
                 />
                 {label}
               </label>
@@ -3281,13 +3293,13 @@ function HomePage() {
                 type="checkbox"
                 checked={newChannelsOnly}
                 onChange={(e) => setNewChannelsOnly(e.target.checked)}
-                className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-zinc-100 accent-zinc-400"
+                className="h-4 w-4 rounded border-purple-800/60 bg-[#1a1035] text-purple-50 accent-zinc-400"
               />
-              <span className="text-sm text-zinc-300">Только новые каналы</span>
+              <span className="text-sm text-purple-200">Только новые каналы</span>
             </label>
             <div
               className={`flex flex-wrap items-center gap-2 text-sm ${
-                newChannelsOnly ? "text-zinc-300" : "text-zinc-500"
+                newChannelsOnly ? "text-purple-200" : "text-purple-400/50"
               }`}
             >
               <span>от</span>
@@ -3301,7 +3313,7 @@ function HomePage() {
                     Math.max(1, Number(e.target.value) || 1)
                   )
                 }
-                className="w-16 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-center text-zinc-100 outline-none transition-colors focus:border-zinc-600 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-16 rounded-md border border-purple-900/50 bg-[#1a1035] px-2 py-1 text-center text-purple-50 outline-none transition-colors focus:border-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
               />
               <span>дней</span>
               <span className="ml-1">до</span>
@@ -3315,18 +3327,18 @@ function HomePage() {
                     Math.max(1, Number(e.target.value) || 1)
                   )
                 }
-                className="w-16 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-center text-zinc-100 outline-none transition-colors focus:border-zinc-600 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-16 rounded-md border border-purple-900/50 bg-[#1a1035] px-2 py-1 text-center text-purple-50 outline-none transition-colors focus:border-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
               />
               <span>месяцев</span>
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer select-none">
+          <label className="flex items-center gap-2 text-sm text-purple-300/70 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={expandedSearch}
               onChange={(e) => setExpandedSearch(e.target.checked)}
-              className="rounded border-zinc-600 bg-zinc-900 accent-amber-500"
+              className="rounded border-purple-700 bg-[#1a1035] accent-fuchsia-500"
             />
             Искать по смежным темам
           </label>
@@ -3335,14 +3347,14 @@ function HomePage() {
             type="button"
             onClick={handleSearch}
             disabled={loading}
-            className="w-full rounded-lg bg-zinc-100 py-3 text-sm font-medium text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 py-3 text-sm font-medium text-white transition-colors hover:from-violet-500 hover:to-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "Ищем…" : "Найти вирусные"}
           </button>
 
           {loading && (
             <div className="flex justify-center py-8">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-100" />
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
             </div>
           )}
 
@@ -3351,7 +3363,7 @@ function HomePage() {
           )}
 
           {!loading && videos.length === 0 && !error && (
-            <p className="text-center text-sm text-zinc-500">
+            <p className="text-center text-sm text-purple-400/50">
               Результаты появятся здесь
             </p>
           )}
@@ -3365,10 +3377,10 @@ function HomePage() {
               return (
               <Fragment key={video.videoId}>
               <article
-                className={`overflow-hidden rounded-lg border bg-zinc-900/50 ${
+                className={`overflow-hidden rounded-lg border bg-[#1a1035]/80 ${
                   isOpen
-                    ? "border-amber-500/60 ring-1 ring-amber-500/40 sm:col-span-2"
-                    : "border-zinc-800"
+                    ? "border-fuchsia-500/60 ring-1 ring-fuchsia-500/40 sm:col-span-2"
+                    : "border-purple-900/50"
                 }`}
               >
                 <div className="relative">
@@ -3380,7 +3392,7 @@ function HomePage() {
                     />
                   )}
                   {video.viralScore >= 2 && (
-                    <span className="absolute right-2 top-2 rounded-md bg-zinc-950/90 px-2 py-1 text-xs font-medium text-amber-400">
+                    <span className="absolute right-2 top-2 rounded-md bg-[#0f0a1e]/90 px-2 py-1 text-xs font-medium text-fuchsia-400">
                       🔥 x{Math.round(video.viralScore)}
                     </span>
                   )}
@@ -3389,8 +3401,8 @@ function HomePage() {
                   <h2 className="line-clamp-2 text-sm font-medium leading-snug">
                     {video.title}
                   </h2>
-                  <p className="text-xs text-zinc-500">{video.channelTitle}</p>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-400">
+                  <p className="text-xs text-purple-400/50">{video.channelTitle}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-purple-300/70">
                     <span>{formatNumber(video.viewCount)} просм.</span>
                     <span>{formatNumber(video.likeCount)} лайков</span>
                     {video.repostCount != null && (
@@ -3402,7 +3414,7 @@ function HomePage() {
                     href={video.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block w-full rounded-md border border-zinc-700 py-2 text-center text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                    className="block w-full rounded-md border border-purple-800/60 py-2 text-center text-sm text-zinc-200 transition-colors hover:border-purple-600 hover:bg-purple-800/60"
                   >
                     Открыть видео
                   </a>
@@ -3456,7 +3468,7 @@ function HomePage() {
                         }, 100);
                       }
                     }}
-                    className="w-full rounded-md border border-zinc-600 bg-zinc-800 py-2 text-center text-sm text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-700"
+                    className="w-full rounded-md border border-purple-700 bg-purple-900/60 py-2 text-center text-sm text-purple-50 transition-colors hover:border-purple-600 hover:bg-purple-800/60"
                   >
                     {isOpen ? "Скрыть сценарий" : "Создать сценарий"}
                   </button>
@@ -3477,7 +3489,7 @@ function HomePage() {
                 <button
                   type="button"
                   onClick={() => setVisibleCount((prev) => prev + 4)}
-                  className="w-full rounded-lg border border-zinc-700 py-3 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                  className="w-full rounded-lg border border-purple-800/60 py-3 text-sm text-purple-200 transition-colors hover:border-purple-600 hover:bg-purple-800/60"
                 >
                   Смотреть ещё ({videos.length - visibleCount} видео)
                 </button>
@@ -3495,7 +3507,7 @@ export default function Home() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">
+        <div className="flex min-h-screen items-center justify-center bg-[#0f0a1e] text-purple-300/70">
           Загрузка…
         </div>
       }
