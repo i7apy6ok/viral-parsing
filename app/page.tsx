@@ -113,15 +113,20 @@ function openVideoWorkspace(
   video: ViralVideoResult,
   keyword: string,
   offer: string
-) {
+): boolean {
   sessionStorage.setItem(
     WORKSPACE_STORAGE_KEY(video.videoId),
     JSON.stringify({ video, keyword, offer })
   );
-  const url = new URL(window.location.href);
-  url.searchParams.set("workspace", "1");
-  url.searchParams.set("v", video.videoId);
-  window.open(url.toString(), "_blank", "noopener,noreferrer");
+  const url = `${window.location.origin}/?workspace=1&v=${encodeURIComponent(video.videoId)}`;
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    window.alert(
+      "Браузер заблокировал новую вкладку. Разрешите всплывающие окна для этого сайта и нажмите «Создать сценарий» снова."
+    );
+    return false;
+  }
+  return true;
 }
 
 const RAILWAY_MERGE_URL =
@@ -2039,77 +2044,6 @@ function HomePage() {
     );
   };
 
-  const handleCustomFootageQuery = async (videoId: string) => {
-    const query = scripts[videoId]?.customFootageQuery.trim();
-    if (!query) {
-      return;
-    }
-
-    setScripts((prev) => ({
-      ...prev,
-      [videoId]: {
-        ...prev[videoId],
-        customFootageQuery: "",
-        footageError: null,
-        footageGroups: [
-          ...prev[videoId].footageGroups,
-          {
-            originalQuery: query,
-            query: toPexelsSearchQuery(query),
-            videos: [],
-            loading: true,
-            selectedIndex: 0,
-          },
-        ],
-      },
-    }));
-
-    const searchQuery = toPexelsSearchQuery(query);
-
-    try {
-      const results = await searchFootageVideos([searchQuery]);
-
-      setScripts((prev) => {
-        const groups = [...prev[videoId].footageGroups];
-        const index = groups.findLastIndex(
-          (group) => group.originalQuery === query && group.loading
-        );
-
-        if (index >= 0) {
-          groups[index] = {
-            ...groups[index],
-            videos: results.filter((video) => video.query === searchQuery),
-            loading: false,
-          };
-        }
-
-        return {
-          ...prev,
-          [videoId]: {
-            ...prev[videoId],
-            footageGroups: groups,
-          },
-        };
-      });
-    } catch (err) {
-      setScripts((prev) => {
-        const groups = prev[videoId].footageGroups.filter(
-          (group) => !(group.query === query && group.loading)
-        );
-
-        return {
-          ...prev,
-          [videoId]: {
-            ...prev[videoId],
-            footageGroups: groups,
-            footageError:
-              err instanceof Error ? err.message : "Ошибка поиска видео",
-          },
-        };
-      });
-    }
-  };
-
   const updateScriptHook = (
     videoId: string,
     index: number,
@@ -2750,6 +2684,8 @@ function HomePage() {
     } catch {
       setError("Ошибка загрузки данных видео");
     }
+    // handleGenerateScript стабилен для одноразовой инициализации workspace
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isWorkspace, workspaceVideoId]);
 
   const renderScriptPanel = (video: ViralVideoResult) => {
