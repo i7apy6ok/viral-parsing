@@ -3383,7 +3383,7 @@ function HomePage() {
               <article
                 className={`overflow-hidden rounded-lg border bg-[#1a1035]/80 ${
                   isOpen
-                    ? "border-fuchsia-500/60 ring-1 ring-fuchsia-500/40 sm:col-span-2"
+                    ? "border-fuchsia-500/60 ring-1 ring-fuchsia-500/40"
                     : "border-purple-900/50"
                 }`}
               >
@@ -3484,11 +3484,6 @@ function HomePage() {
                 </div>
 
               </article>
-              {isOpen && (
-                <div id="script-panel" className="sm:col-span-2">
-                  {renderScriptPanel(video)}
-                </div>
-              )}
               </Fragment>
             );
             })}
@@ -3503,6 +3498,14 @@ function HomePage() {
                   Смотреть ещё ({videos.length - visibleCount} видео)
                 </button>
               )}
+              {openVideoId && (() => {
+                const openVideo = videos.find((v) => v.videoId === openVideoId);
+                return openVideo ? (
+                  <div id="script-panel" className="mt-4 w-full">
+                    {renderScriptPanel(openVideo)}
+                  </div>
+                ) : null;
+              })()}
             </div>
           )}
         </div>
