@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   Suspense,
   useEffect,
   useRef,
@@ -108,26 +109,6 @@ const FOOTAGE_DEFAULTS = {
 
 const WORKSPACE_STORAGE_KEY = (videoId: string) =>
   `viral-parsing:workspace:${videoId}`;
-
-function openVideoWorkspace(
-  video: ViralVideoResult,
-  keyword: string,
-  offer: string
-): boolean {
-  sessionStorage.setItem(
-    WORKSPACE_STORAGE_KEY(video.videoId),
-    JSON.stringify({ video, keyword, offer })
-  );
-  const url = `${window.location.origin}/?workspace=1&v=${encodeURIComponent(video.videoId)}`;
-  const opened = window.open(url, "_blank", "noopener,noreferrer");
-  if (!opened) {
-    window.alert(
-      "Браузер заблокировал новую вкладку. Разрешите всплывающие окна для этого сайта и нажмите «Создать сценарий» снова."
-    );
-    return false;
-  }
-  return true;
-}
 
 const RAILWAY_MERGE_URL =
   "https://viral-parsing-production.up.railway.app/merge";
@@ -1363,7 +1344,6 @@ function HomePage() {
     {}
   );
   const [openVideoId, setOpenVideoId] = useState<string | null>(null);
-  const [focusedVideoId, setFocusedVideoId] = useState<string | null>(null);
   const manualSlotInputRefs = useRef<Record<string, HTMLInputElement | null>>(
     {}
   );
@@ -1371,7 +1351,6 @@ function HomePage() {
     {}
   );
   const [visibleCount, setVisibleCount] = useState(4);
-  const [videoListVisible, setVideoListVisible] = useState(true);
 
   const handleSearch = async () => {
     if (!keyword.trim()) {
@@ -1382,7 +1361,6 @@ function HomePage() {
     setLoading(true);
     setError(null);
     setOpenVideoId(null);
-    setFocusedVideoId(null);
     setVideos([]);
     setScripts({});
     setVisibleCount(4);
@@ -2637,21 +2615,6 @@ function HomePage() {
     openVideoId != null
       ? videos.find((item) => item.videoId === openVideoId) ?? null
       : null;
-  const activePanel = openVideoId ? scripts[openVideoId] : undefined;
-  const hasScriptPanel = activePanel?.data != null;
-  const hideVideoList = hasScriptPanel && !videoListVisible;
-
-  useEffect(() => {
-    if (!openVideoId) {
-      setVideoListVisible(true);
-    }
-  }, [openVideoId]);
-
-  useEffect(() => {
-    if (hasScriptPanel && !isWorkspace) {
-      setVideoListVisible(false);
-    }
-  }, [hasScriptPanel, isWorkspace]);
 
   useEffect(() => {
     if (!isWorkspace || !workspaceVideoId || workspaceBootstrapped.current) {
@@ -2677,8 +2640,6 @@ function HomePage() {
       setKeyword(payload.keyword ?? "");
       setOffer(payload.offer ?? "");
       setOpenVideoId(workspaceVideoId);
-      setFocusedVideoId(workspaceVideoId);
-      setVideoListVisible(false);
       setError(null);
       void handleGenerateScript(payload.video);
     } catch {
@@ -3197,11 +3158,7 @@ function HomePage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <main
-        className={`mx-auto px-4 py-12 sm:px-6 ${
-          hideVideoList ? "max-w-full" : "max-w-2xl"
-        }`}
-      >
+      <main className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
         <h1 className="mb-8 text-center text-2xl font-semibold tracking-tight sm:text-3xl">
           {isWorkspace ? "Сценарий для видео" : "Найди вирусное видео"}
         </h1>
@@ -3406,42 +3363,19 @@ function HomePage() {
           )}
 
           {videos.length > 0 && (
-            <div
-              className={
-                openVideoId ? "flex items-start gap-4" : "space-y-4"
-              }
-            >
-              <div
-                className={openVideoId ? "min-w-0 shrink-0 space-y-4" : "space-y-4"}
-                style={
-                  openVideoId
-                    ? {
-                        display: hideVideoList ? "none" : undefined,
-                        width: hideVideoList ? undefined : "min(420px, 40%)",
-                      }
-                    : undefined
-                }
-              >
-                <div
-                  className={
-                    openVideoId
-                      ? "grid grid-cols-1 gap-3"
-                      : "grid grid-cols-1 gap-4 sm:grid-cols-2"
-                  }
-                >
-            {(focusedVideoId
-              ? videos.filter((item) => item.videoId === focusedVideoId)
-              : videos.slice(0, visibleCount)
-            ).map((video) => {
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {videos.slice(0, visibleCount).map((video) => {
               const panel = scripts[video.videoId];
+              const isOpen = openVideoId === video.videoId;
               return (
+              <Fragment key={video.videoId}>
               <article
-                key={video.videoId}
                 className={`overflow-hidden rounded-lg border bg-zinc-900/50 ${
-                  openVideoId && openVideoId === video.videoId
-                    ? "border-amber-500/60 ring-1 ring-amber-500/40"
+                  isOpen
+                    ? "border-amber-500/60 ring-1 ring-amber-500/40 sm:col-span-2"
                     : "border-zinc-800"
-                } ${openVideoId ? "" : " sm:col-span-1"}`}
+                }`}
               >
                 <div className="relative">
                   {video.thumbnail && (
@@ -3509,25 +3443,43 @@ function HomePage() {
 
                   <button
                     type="button"
-                    onClick={() =>
-                      openVideoWorkspace(
-                        video,
-                        keyword.trim(),
-                        offer.trim()
-                      )
-                    }
+                    onClick={() => {
+                      if (isOpen) {
+                        setOpenVideoId(null);
+                        return;
+                      }
+                      setOpenVideoId(video.videoId);
+                      if (!panel?.data && !panel?.loading) {
+                        void handleGenerateScript(video);
+                      } else {
+                        setTimeout(() => {
+                          document
+                            .getElementById("script-panel")
+                            ?.scrollIntoView({
+                              behavior: "smooth",
+                              block: "start",
+                            });
+                        }, 100);
+                      }
+                    }}
                     className="w-full rounded-md border border-zinc-600 bg-zinc-800 py-2 text-center text-sm text-zinc-100 transition-colors hover:border-zinc-500 hover:bg-zinc-700"
                   >
-                    Создать сценарий
+                    {isOpen ? "Скрыть сценарий" : "Создать сценарий"}
                   </button>
                 </div>
 
               </article>
+              {isOpen && (
+                <div id="script-panel" className="sm:col-span-2">
+                  {renderScriptPanel(video)}
+                </div>
+              )}
+              </Fragment>
             );
             })}
               </div>
 
-              {!focusedVideoId && videos.length > visibleCount && (
+              {videos.length > visibleCount && (
                 <button
                   type="button"
                   onClick={() => setVisibleCount((prev) => prev + 4)}
@@ -3535,26 +3487,6 @@ function HomePage() {
                 >
                   Смотреть ещё ({videos.length - visibleCount} видео)
                 </button>
-              )}
-              </div>
-
-              {openVideoId && activeVideo && (
-                <div
-                  id="script-panel"
-                  className="min-w-0 flex-1"
-                  style={{ width: hideVideoList ? "100%" : undefined }}
-                >
-                  {hideVideoList && (
-                    <button
-                      type="button"
-                      onClick={() => setVideoListVisible(true)}
-                      className="mb-4 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
-                    >
-                      ← Назад к видео
-                    </button>
-                  )}
-                  {renderScriptPanel(activeVideo)}
-                </div>
               )}
             </div>
           )}
