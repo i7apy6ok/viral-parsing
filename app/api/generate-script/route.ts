@@ -16,6 +16,8 @@ type GenerateScriptBody = {
   videoType?: VideoType;
   preferredProvider?: ScriptProvider;
   transcript?: string;
+  videoBase64?: string;
+  videoMimeType?: string;
 };
 
 export type ScriptResult = {
@@ -425,6 +427,83 @@ async function generateWithOpenRouter(
   }
 }
 
+async function generateWithOpenRouterFile(
+  prompt: string,
+  videoBase64: string,
+  videoMimeType: string
+): Promise<Omit<ScriptResult, "transcriptUsed" | "provider">> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 110000);
+  const dataUrl = `data:${videoMimeType};base64,${videoBase64}`;
+
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": "https://viral-parsing.vercel.app",
+        "X-Title": "Viral Parsing Script Generator",
+      },
+      body: JSON.stringify({
+        model: GEMINI_MODEL,
+        max_tokens: 2500,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "video_url",
+                video_url: { url: dataUrl },
+              },
+              {
+                type: "text",
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await res.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(
+        `OpenRouter (file) returned invalid JSON: ${rawText.slice(0, 200)}`
+      );
+    }
+
+    if (!res.ok) {
+      const apiError = (data as { error?: { message?: string } })?.error;
+      throw new Error(
+        `OpenRouter (file) API ${res.status}: ${apiError?.message ?? JSON.stringify(data)}`
+      );
+    }
+
+    const content = (
+      data as { choices?: Array<{ message?: { content?: string } }> }
+    ).choices?.[0]?.message?.content;
+
+    if (typeof content !== "string") {
+      throw new Error(
+        `Empty response from OpenRouter/Gemini (file): ${JSON.stringify(data)}`
+      );
+    }
+
+    console.log(`[OpenRouter] OK for uploaded file, length ${content.length}`);
+    return parseScriptResponse(content);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Provider 2: Gemini via OpenRouter + transcript (SECONDARY)
 // ---------------------------------------------------------------------------
@@ -631,11 +710,14 @@ async function generateScript(
   language: ScriptLanguage,
   videoType: VideoType = "short",
   preferredProvider: ScriptProvider = "gemini",
-  clientTranscript?: string
+  clientTranscript?: string,
+  videoBase64?: string,
+  videoMimeType?: string
 ): Promise<{
   result: Omit<ScriptResult, "transcriptUsed" | "provider">;
   provider: string;
 }> {
+  const isUploadedFile = Boolean(videoBase64?.trim());
   const promptNoTranscript = buildPrompt(
     niche,
     title,
@@ -647,7 +729,7 @@ async function generateScript(
 
   const clientTx = clientTranscript?.trim() || null;
   const fetchedTranscript =
-    clientTx === null ? await fetchTranscript(videoId) : null;
+    clientTx === null && !isUploadedFile ? await fetchTranscript(videoId) : null;
   const transcript = clientTx ?? fetchedTranscript;
 
   const promptWithTranscript = buildPrompt(
@@ -684,7 +766,31 @@ async function generateScript(
   }
 
   // preferredProvider === "gemini"
-  if (!clientTx && process.env.OPENROUTER_API_KEY) {
+  if (
+    isUploadedFile &&
+    videoBase64 &&
+    process.env.OPENROUTER_API_KEY &&
+    preferredProvider === "gemini"
+  ) {
+    try {
+      const result = await generateWithOpenRouterFile(
+        promptNoTranscript,
+        videoBase64,
+        videoMimeType || "video/mp4"
+      );
+      return { result, provider: "gemini-2.5-flash-file" };
+    } catch (error) {
+      const isTimeout =
+        error instanceof Error && error.name === "AbortError";
+      console.warn(
+        `[orchestrator] Gemini file failed (timeout: ${isTimeout}): ${
+          error instanceof Error ? error.message : error
+        }, trying transcript path...`
+      );
+    }
+  }
+
+  if (!clientTx && !isUploadedFile && process.env.OPENROUTER_API_KEY) {
     try {
       const result = await generateWithOpenRouter(videoId, promptNoTranscript);
       return { result, provider: "gemini-2.5-flash" };
@@ -751,6 +857,8 @@ export async function POST(request: Request) {
       videoType = "short",
       preferredProvider: rawProvider,
       transcript: clientTranscript,
+      videoBase64,
+      videoMimeType,
     } = body;
     const language = normalizeLanguage(rawLanguage);
     const preferredProvider = normalizeProvider(rawProvider);
@@ -777,7 +885,9 @@ export async function POST(request: Request) {
       language,
       videoType,
       preferredProvider,
-      clientTranscript
+      clientTranscript,
+      videoBase64,
+      videoMimeType
     );
 
     return NextResponse.json({

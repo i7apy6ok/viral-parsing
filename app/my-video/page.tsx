@@ -51,9 +51,21 @@ function MyVideoPage() {
 
   const videoId = extractVideoId(url);
 
+  async function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(",")[1] ?? "");
+      };
+      reader.onerror = () => reject(new Error("Ошибка чтения файла"));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function handleGenerate(transcriptOverride?: string) {
-    if (!videoId) {
-      setError("Введите корректную ссылку на YouTube видео");
+    if (!videoId && !videoFile) {
+      setError("Введите ссылку на YouTube видео или загрузите файл");
       return;
     }
     setLoading(true);
@@ -62,10 +74,29 @@ function MyVideoPage() {
     setNeedsUpload(false);
 
     try {
-      const res = await fetch("/api/generate-script", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      let body: Record<string, unknown>;
+
+      if (videoFile) {
+        const sizeMb = videoFile.size / 1024 / 1024;
+        if (sizeMb > 50) {
+          throw new Error(
+            "Файл слишком большой (максимум 50 МБ). Используйте ссылку на YouTube."
+          );
+        }
+        const base64 = await fileToBase64(videoFile);
+        body = {
+          videoId: `file_${Date.now()}`,
+          title: videoFile.name,
+          niche: niche.trim() || "общая тема",
+          offer: offer.trim(),
+          language,
+          preferredProvider: provider,
+          transcript: transcriptOverride ?? (transcript.trim() || undefined),
+          videoBase64: base64,
+          videoMimeType: videoFile.type || "video/mp4",
+        };
+      } else {
+        body = {
           videoId,
           title: url,
           niche: niche.trim() || "общая тема",
@@ -73,7 +104,13 @@ function MyVideoPage() {
           language,
           preferredProvider: provider,
           transcript: transcriptOverride ?? (transcript.trim() || undefined),
-        }),
+        };
+      }
+
+      const res = await fetch("/api/generate-script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
 
       const data = (await res.json()) as ScriptResult & { error?: string };
@@ -86,7 +123,8 @@ function MyVideoPage() {
         !data.transcriptUsed &&
         provider === "gemini" &&
         !transcriptOverride &&
-        !transcript
+        !transcript &&
+        !videoFile
       ) {
         setNeedsUpload(true);
       }
@@ -270,10 +308,14 @@ function MyVideoPage() {
         <button
           type="button"
           onClick={() => void handleGenerate()}
-          disabled={loading || !url.trim()}
+          disabled={loading || (!url.trim() && !videoFile)}
           className="mb-6 w-full rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
         >
-          {loading ? "Генерируем сценарий…" : "Создать сценарий"}
+          {loading
+            ? "Генерируем сценарий…"
+            : videoFile
+              ? `Создать сценарий по файлу: ${videoFile.name.slice(0, 30)}`
+              : "Создать сценарий"}
         </button>
 
         {error && (
