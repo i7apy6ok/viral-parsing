@@ -2635,11 +2635,15 @@ function HomePage() {
       setError(null);
 
       if (payload.scriptData) {
+        const scriptData =
+          typeof payload.scriptData === "string"
+            ? (JSON.parse(payload.scriptData) as ScriptResult)
+            : (payload.scriptData as ScriptResult);
         setScripts((prev) => ({
           ...prev,
           [workspaceVideoId]: {
             loading: false,
-            data: payload.scriptData as ScriptResult,
+            data: scriptData,
             error: null,
             selectedHook: null,
             copiedHook: null,
