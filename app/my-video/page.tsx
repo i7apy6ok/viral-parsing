@@ -45,6 +45,7 @@ function MyVideoPage() {
   const [error, setError] = useState<string | null>(null);
   const [needsUpload, setNeedsUpload] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [copiedHook, setCopiedHook] = useState<number | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
@@ -148,6 +149,46 @@ function MyVideoPage() {
           )}
         </div>
 
+        {/* OR divider */}
+        <div className="mb-4 flex items-center gap-3">
+          <div className="h-px flex-1 bg-purple-900/50" />
+          <span className="text-sm font-medium text-purple-400/60">ИЛИ</span>
+          <div className="h-px flex-1 bg-purple-900/50" />
+        </div>
+
+        {/* File upload */}
+        <div className="mb-6">
+          <label className="mb-1.5 block text-sm text-purple-300/70">
+            Загрузить видео
+          </label>
+          <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-purple-700/60 bg-[#1a1035] py-4 text-sm text-purple-300/70 transition-colors hover:border-purple-500 hover:bg-purple-900/20">
+            <span>📁</span>
+            <span>
+              {videoFile ? videoFile.name : "Выбрать файл (mp4, mov, avi)"}
+            </span>
+            <input
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                setVideoFile(file);
+                if (file) setUrl("");
+              }}
+            />
+          </label>
+          {videoFile && (
+            <button
+              type="button"
+              onClick={() => setVideoFile(null)}
+              className="mt-1 text-xs text-purple-400/50 hover:text-purple-300"
+            >
+              ✕ Убрать файл
+            </button>
+          )}
+        </div>
+
+        {/* Niche */}
         <div className="mb-4">
           <label className="mb-1.5 block text-sm text-purple-300/70">
             Ниша / тема (необязательно)
@@ -161,6 +202,7 @@ function MyVideoPage() {
           />
         </div>
 
+        {/* Offer */}
         <div className="mb-6">
           <label className="mb-1.5 block text-sm text-purple-300/70">
             Ваш оффер (необязательно)
