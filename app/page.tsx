@@ -2273,12 +2273,16 @@ function HomePage() {
         return bytes.buffer;
       };
 
-      const BATCH_SIZE = 50;
+      const BATCH_SIZE = 10;
       const audioBuffers: ArrayBuffer[] = [];
       for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
         const batch = chunks.slice(i, i + BATCH_SIZE);
         const batchResults = await Promise.all(batch.map(synthesizeChunk));
         audioBuffers.push(...batchResults);
+        // Small delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < chunks.length) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
         setScripts((prev) => ({
           ...prev,
           [videoId]: {
