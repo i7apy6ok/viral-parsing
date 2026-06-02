@@ -14,6 +14,7 @@ type GenerateScriptBody = {
   offer?: string;
   language?: ScriptLanguage;
   videoType?: VideoType;
+  videoDuration?: number;
   preferredProvider?: ScriptProvider;
   transcript?: string;
   videoBase64?: string;
@@ -163,7 +164,8 @@ function buildPrompt(
   offer?: string,
   language: ScriptLanguage = "ru",
   transcript?: string,
-  videoType: VideoType = "short"
+  videoType: VideoType = "short",
+  videoDuration?: number
 ): string {
   const offerTrimmed = offer?.trim() ?? "";
   const ctaInstruction = offerTrimmed
@@ -180,8 +182,13 @@ function buildPrompt(
 
   const isLong = videoType === "long";
 
+  const durationMin = videoDuration ? Math.round(videoDuration / 60) : null;
+  const durationInstruction = durationMin
+    ? `Длина оригинального видео: ${durationMin} минут. Создай сценарий примерно такой же длины (±10%).`
+    : `Создай полноценный сценарий для длинного YouTube видео (8-15 минут).`;
+
   const formatInstruction = isLong
-    ? `Создай полноценный сценарий для длинного YouTube видео (8-15 минут, примерно 102-123% от длины оригинала).`
+    ? `Создай полноценный сценарий для длинного YouTube видео. ${durationInstruction} Говори подробно, раскрывай каждый тезис, не сокращай. Сценарий должен быть рассчитан на ${durationMin ? durationMin + " минут" : "8-15 минут"} живой речи (~${durationMin ? durationMin * 130 : "1000-2000"} слов).`
     : `Создай адаптированный сценарий для короткого видео (30-60 сек).`;
 
   const structureInstruction = isLong
@@ -205,7 +212,8 @@ ${ctaInstruction}
 6. ПРЕДЛОЖЕНИЯ (sentences):
 Разбей основную часть (body) на отдельные предложения для озвучки по одному.
 Каждый элемент массива sentences — ровно одно предложение, не больше.
-Важно: sentences используются для TTS-озвучки по чанкам, поэтому не склеивай предложения вместе.`
+Важно: sentences используются для TTS-озвучки по чанкам, поэтому не склеивай предложения вместе.
+ВАЖНО: sentences должен содержать ВСЕ предложения из body, не менее 30-50 штук для длинного видео. Каждый элемент — одно предложение. Не сокращай и не пропускай предложения.`
     : `1. ТРИ ВАРИАНТА ХУКА (первые 3 секунды):
 Хук 1 (Провокация): ...
 Хук 2 (Боль/проблема): ...
@@ -712,7 +720,8 @@ async function generateScript(
   preferredProvider: ScriptProvider = "gemini",
   clientTranscript?: string,
   videoBase64?: string,
-  videoMimeType?: string
+  videoMimeType?: string,
+  videoDuration?: number
 ): Promise<{
   result: Omit<ScriptResult, "transcriptUsed" | "provider">;
   provider: string;
@@ -724,7 +733,8 @@ async function generateScript(
     offer,
     language,
     undefined,
-    videoType
+    videoType,
+    videoDuration
   );
 
   const clientTx = clientTranscript?.trim() || null;
@@ -738,7 +748,8 @@ async function generateScript(
     offer,
     language,
     transcript ?? undefined,
-    videoType
+    videoType,
+    videoDuration
   );
 
   if (preferredProvider === "groq") {
@@ -855,6 +866,7 @@ export async function POST(request: Request) {
       offer,
       language: rawLanguage,
       videoType = "short",
+      videoDuration,
       preferredProvider: rawProvider,
       transcript: clientTranscript,
       videoBase64,
@@ -887,7 +899,10 @@ export async function POST(request: Request) {
       preferredProvider,
       clientTranscript,
       videoBase64,
-      videoMimeType
+      videoMimeType,
+      typeof videoDuration === "number" && videoDuration > 0
+        ? videoDuration
+        : undefined
     );
 
     return NextResponse.json({

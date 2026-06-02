@@ -1331,6 +1331,8 @@ function HomePage() {
           offer: offer.trim(),
           language: scriptLanguage,
           videoType: type,
+          videoDuration:
+            video.durationSeconds > 0 ? video.durationSeconds : null,
         }),
       });
 
