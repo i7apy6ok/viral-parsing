@@ -876,13 +876,19 @@ export async function POST(request: Request) {
     const preferredProvider = normalizeProvider(rawProvider);
 
     if (!videoId?.trim()) {
-      return NextResponse.json({ error: "videoId is required" }, { status: 400 });
+      const error = "videoId is required";
+      console.error("[generate-script] error:", error);
+      return NextResponse.json({ error }, { status: 400 });
     }
     if (!title?.trim()) {
-      return NextResponse.json({ error: "title is required" }, { status: 400 });
+      const error = "title is required";
+      console.error("[generate-script] error:", error);
+      return NextResponse.json({ error }, { status: 400 });
     }
     if (!niche?.trim()) {
-      return NextResponse.json({ error: "niche is required" }, { status: 400 });
+      const error = "niche is required";
+      console.error("[generate-script] error:", error);
+      return NextResponse.json({ error }, { status: 400 });
     }
 
     console.log(
@@ -913,7 +919,11 @@ export async function POST(request: Request) {
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Internal server error";
-    console.error("[generate-script] fatal error:", message, error);
+    console.error("[generate-script] fatal error:", message);
+    if (error instanceof Error && error.stack) {
+      console.error("[generate-script] stack:", error.stack);
+    }
+    console.error("[generate-script] full error:", error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

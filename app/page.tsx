@@ -1350,6 +1350,7 @@ function HomePage() {
       }
 
       if (!res.ok) {
+        console.error("generate-script response:", res.status, data);
         throw new Error(data.error ?? "Ошибка генерации сценария");
       }
 
@@ -1375,6 +1376,7 @@ function HomePage() {
         },
       }));
     } catch (err) {
+      console.error("generate-script failed:", err);
       setScripts((prev) => ({
         ...prev,
         [id]: {

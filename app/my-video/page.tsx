@@ -114,6 +114,9 @@ function MyVideoPage() {
       });
 
       const data = (await res.json()) as ScriptResult & { error?: string };
+      if (!res.ok) {
+        console.error("generate-script response:", res.status, data);
+      }
 
       if (!res.ok) {
         throw new Error(data.error ?? "Ошибка генерации сценария");
@@ -160,6 +163,7 @@ function MyVideoPage() {
       );
       window.location.href = `/?workspace=1&v=${fakeVideoId}`;
     } catch (err) {
+      console.error("generate-script failed:", err);
       setError(err instanceof Error ? err.message : "Ошибка генерации");
     } finally {
       setLoading(false);
