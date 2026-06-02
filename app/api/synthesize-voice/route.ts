@@ -91,7 +91,8 @@ function voicerErrorMessage(status: number): string {
 async function voicerFetch(
   path: string,
   apiKey: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  attempt = 1
 ): Promise<Response> {
   const url = `${VOICER_BASE_URL}${path}`;
   const res = await fetch(url, {
@@ -102,7 +103,16 @@ async function voicerFetch(
     },
   });
 
-  console.log(`Voicer ${options.method ?? "GET"} ${path} → ${res.status}`);
+  console.log(
+    `Voicer ${options.method ?? "GET"} ${path} → ${res.status}${attempt > 1 ? ` (retry ${attempt})` : ""}`
+  );
+
+  if (res.status === 429 && attempt < 6) {
+    const delayMs = 3000 * attempt;
+    console.log(`Voicer 429, retry in ${delayMs}ms`);
+    await sleep(delayMs);
+    return voicerFetch(path, apiKey, options, attempt + 1);
+  }
 
   if (res.status === 401 || res.status === 402 || res.status === 429) {
     throw new VoicerHttpError(res.status, voicerErrorMessage(res.status));
