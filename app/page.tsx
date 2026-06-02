@@ -2626,13 +2626,37 @@ function HomePage() {
         video: ViralVideoResult;
         keyword: string;
         offer: string;
+        scriptData?: ScriptResult;
       };
       setVideos([payload.video]);
       setKeyword(payload.keyword ?? "");
       setOffer(payload.offer ?? "");
       setOpenVideoId(workspaceVideoId);
       setError(null);
-      void handleGenerateScript(payload.video);
+
+      if (payload.scriptData) {
+        setScripts((prev) => ({
+          ...prev,
+          [workspaceVideoId]: {
+            loading: false,
+            data: payload.scriptData as ScriptResult,
+            error: null,
+            selectedHook: null,
+            copiedHook: null,
+            copiedAll: false,
+            voiceLoading: false,
+            voiceProgress: null,
+            voiceError: null,
+            voiceAudioUrl: null,
+            voiceAudioBlob: null,
+            audioDuration: null,
+            language: "ru",
+            ...FOOTAGE_DEFAULTS,
+          },
+        }));
+      } else {
+        void handleGenerateScript(payload.video);
+      }
     } catch {
       setError("Ошибка загрузки данных видео");
     }

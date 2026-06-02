@@ -130,6 +130,35 @@ function MyVideoPage() {
       }
 
       setScript(data);
+
+      const fakeVideoId = String(body.videoId ?? videoId ?? `file_${Date.now()}`);
+      const workspacePayload = {
+        video: {
+          videoId: fakeVideoId,
+          title: videoFile ? videoFile.name : url,
+          thumbnail: videoId
+            ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`
+            : "",
+          viewCount: 0,
+          likeCount: 0,
+          commentCount: 0,
+          channelTitle: "",
+          channelAge: "",
+          viralScore: 0,
+          velocity: 0,
+          url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : "",
+          platform: "youtube" as const,
+          durationSeconds: 0,
+        },
+        keyword: niche.trim() || "общая тема",
+        offer: offer.trim(),
+        scriptData: data,
+      };
+      sessionStorage.setItem(
+        `viral-parsing:workspace:${fakeVideoId}`,
+        JSON.stringify(workspacePayload)
+      );
+      window.location.href = `/?workspace=1&v=${fakeVideoId}`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка генерации");
     } finally {
