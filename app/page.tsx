@@ -45,6 +45,22 @@ type ManualGroup = {
   slotDurations: [number, number, number] | null;
 };
 
+type AIImageSlot = {
+  imageUrl: string | null;
+  loading: boolean;
+  error: string | null;
+  animating: boolean;
+  animatedVideoUrl: string | null;
+  animateError: string | null;
+  customPrompt: string | null;
+};
+
+type AIImageGroup = {
+  originalText: string;
+  translation: string;
+  slots: [AIImageSlot, AIImageSlot, AIImageSlot];
+};
+
 type AudioSegment = {
   start: number;
   end: number;
@@ -81,6 +97,7 @@ type ScriptPanelState = {
   footageError: string | null;
   footageGroups: FootageGroup[];
   manualGroups: ManualGroup[];
+  aiImageGroups: AIImageGroup[] | null;
   customFootageQuery: string;
   language: ScriptLanguage;
   clipMode: ClipMode;
@@ -96,6 +113,7 @@ const FOOTAGE_DEFAULTS = {
   footageError: null,
   footageGroups: [] as FootageGroup[],
   manualGroups: [] as ManualGroup[],
+  aiImageGroups: null as AIImageGroup[] | null,
   customFootageQuery: "",
   clipMode: null as ClipMode,
   mergeLoading: false,
@@ -418,18 +436,58 @@ function parseRussianTranslation(query: string): string | null {
 
 const TRANSLATION_STYLE = { color: "#888", fontStyle: "italic" as const };
 
+function parseTranslation(text: string): {
+  originalText: string;
+  translation: string;
+} {
+  const translation = parseRussianTranslation(text);
+  if (!translation) {
+    return { originalText: text.trim(), translation: "" };
+  }
+  return {
+    originalText: toPexelsSearchQuery(text),
+    translation,
+  };
+}
+
 function splitTextWithTranslation(text: string): {
   main: string;
   translation: string | null;
 } {
-  const translation = parseRussianTranslation(text);
-  if (!translation) {
-    return { main: text.trim(), translation: null };
-  }
+  const { originalText, translation } = parseTranslation(text);
   return {
-    main: toPexelsSearchQuery(text),
-    translation,
+    main: originalText,
+    translation: translation || null,
   };
+}
+
+const EMPTY_AI_IMAGE_SLOT = (): AIImageSlot => ({
+  imageUrl: null,
+  loading: false,
+  error: null,
+  animating: false,
+  animatedVideoUrl: null,
+  animateError: null,
+  customPrompt: null,
+});
+
+function buildAIImageGroups(
+  sentences: string[],
+  hook: string
+): AIImageGroup[] {
+  const allTexts = [hook, ...sentences].map((t) => t.trim()).filter(Boolean);
+  return allTexts.map((text) => {
+    const { originalText, translation } = parseTranslation(text);
+    return {
+      originalText,
+      translation,
+      slots: [
+        EMPTY_AI_IMAGE_SLOT(),
+        EMPTY_AI_IMAGE_SLOT(),
+        EMPTY_AI_IMAGE_SLOT(),
+      ],
+    };
+  });
 }
 
 function combineWithTranslation(
@@ -605,8 +663,8 @@ function buildCtaManualGroup(
     return null;
   }
 
-  const ctaTranslation = parseRussianTranslation(rawCta);
-  const ctaQuery = stripTranslation(rawCta).trim();
+  const { originalText: ctaQuery, translation: ctaTranslation } =
+    parseTranslation(rawCta);
   const initialQuery = (
     script.videoQueries[script.videoQueries.length - 1] ??
     script.videoQueries[0] ??
@@ -615,8 +673,7 @@ function buildCtaManualGroup(
 
   return {
     originalText: ctaQuery,
-    translation:
-      language !== "ru" && ctaTranslation ? ctaTranslation : "",
+    translation: language !== "ru" && ctaTranslation ? ctaTranslation : "",
     slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
       createManualSlot(initialQuery)
     ),
@@ -720,8 +777,8 @@ function buildManualGroups(
   let groups: ManualGroup[] = sentenceGroups;
 
   if (rawHook) {
-    const hookTranslation = parseRussianTranslation(rawHook);
-    const hookQuery = stripTranslation(rawHook).trim();
+    const { originalText: hookQuery, translation: hookTranslation } =
+      parseTranslation(rawHook);
     const hookGroup: ManualGroup = {
       originalText: hookQuery,
       translation:
@@ -1814,6 +1871,107 @@ function HomePage() {
     }));
   };
 
+  const updateAISlot = (
+    videoId: string,
+    groupIdx: number,
+    slotIdx: number,
+    patch: Partial<AIImageSlot>
+  ) => {
+    setScripts((prev) => {
+      const panel = prev[videoId];
+      if (!panel?.aiImageGroups) return prev;
+      const groups = panel.aiImageGroups.map((g, gi) => {
+        if (gi !== groupIdx) return g;
+        const slots = g.slots.map((s, si) =>
+          si === slotIdx ? { ...s, ...patch } : s
+        ) as [AIImageSlot, AIImageSlot, AIImageSlot];
+        return { ...g, slots };
+      });
+      return {
+        ...prev,
+        [videoId]: { ...panel, aiImageGroups: groups },
+      };
+    });
+  };
+
+  const handleGenerateAIImage = async (
+    videoId: string,
+    groupIdx: number,
+    slotIdx: number
+  ) => {
+    const panel = scripts[videoId];
+    if (!panel?.aiImageGroups) return;
+    const group = panel.aiImageGroups[groupIdx];
+    const slot = group.slots[slotIdx];
+    const prompt = slot.customPrompt?.trim() || group.originalText;
+
+    updateAISlot(videoId, groupIdx, slotIdx, { loading: true, error: null });
+
+    try {
+      const res = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = (await res.json()) as {
+        imageUrl?: string | null;
+        error?: string | null;
+      };
+      updateAISlot(videoId, groupIdx, slotIdx, {
+        loading: false,
+        imageUrl: data.imageUrl ?? null,
+        error: data.error ?? (res.ok ? null : "Ошибка генерации"),
+      });
+    } catch {
+      updateAISlot(videoId, groupIdx, slotIdx, {
+        loading: false,
+        error: "Ошибка запроса",
+      });
+    }
+  };
+
+  const handleAnimateAIImage = async (
+    videoId: string,
+    groupIdx: number,
+    slotIdx: number
+  ) => {
+    const panel = scripts[videoId];
+    if (!panel?.aiImageGroups) return;
+    const group = panel.aiImageGroups[groupIdx];
+    const slot = group.slots[slotIdx];
+    if (!slot.imageUrl) return;
+
+    updateAISlot(videoId, groupIdx, slotIdx, {
+      animating: true,
+      animateError: null,
+    });
+
+    try {
+      const res = await fetch("/api/animate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl: slot.imageUrl,
+          prompt: slot.customPrompt?.trim() || group.originalText,
+        }),
+      });
+      const data = (await res.json()) as {
+        videoUrl?: string | null;
+        error?: string | null;
+      };
+      updateAISlot(videoId, groupIdx, slotIdx, {
+        animating: false,
+        animatedVideoUrl: data.videoUrl ?? null,
+        animateError: data.error ?? (res.ok ? null : "Ошибка оживления"),
+      });
+    } catch {
+      updateAISlot(videoId, groupIdx, slotIdx, {
+        animating: false,
+        animateError: "Ошибка запроса",
+      });
+    }
+  };
+
   const commitManualSlotQuery = (
     videoId: string,
     groupIndex: number,
@@ -2414,6 +2572,7 @@ function HomePage() {
           footageGroups: [],
           openFootageIndex: null,
           manualGroups: [],
+          aiImageGroups: null,
         },
       }));
       void loadManualFootageForVideo(
@@ -2425,20 +2584,25 @@ function HomePage() {
       return;
     }
 
+    const hookIndex = getSelectedHookIndex(selectedHook);
+    const hook = script.hooks[hookIndex] ?? script.hooks[0] ?? "";
+    const sentences = (script.sentences ?? [])
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     setScripts((prev) => ({
       ...prev,
       [videoId]: {
         ...prev[videoId],
         clipMode: "sentences",
         footageSearchStarted: true,
+        footageGroups: [],
+        footageError: null,
+        footageLoading: false,
         manualGroups: [],
+        aiImageGroups: buildAIImageGroups(sentences, hook),
       },
     }));
-
-    const queries = getFootageQueries(script, selectedHook);
-    if (queries.length) {
-      void loadFootageForVideo(videoId, queries);
-    }
   };
 
   const handleDownloadVideo = async (videoId: string) => {
@@ -3010,158 +3174,219 @@ function HomePage() {
               </>
             ) : (
               <>
-            {panel.footageLoading &&
-              panel.footageGroups.length === 0 && (
-                <div className="flex items-center gap-2 py-3">
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
-                  <span className="text-xs text-purple-300/70">
-                    Ищем видео на Pexels…
-                  </span>
-                </div>
-              )}
-
-            {panel.footageError && (
-              <p className="mb-3 text-xs text-red-400">
-                {panel.footageError}
-              </p>
-            )}
-
-            <div className="space-y-4">
-              {panel.footageGroups.map((group, queryIndex) => {
-                const activeVideo =
-                  group.videos.length > 0
-                    ? group.videos[
-                        group.selectedIndex %
-                          group.videos.length
-                      ]
-                    : null;
-
-                const hookIndex = getSelectedHookIndex(
-                  panel.selectedHook
-                );
-                const rawHook =
-                  panel.data?.hooks[hookIndex] ??
-                  panel.data?.hooks[0] ??
-                  "";
-                const rawCta = panel.data?.cta?.trim() ?? "";
-                const isHookBlock =
-                  queryIndex === 0 &&
-                  Boolean(rawHook.trim()) &&
-                  stripTranslation(rawHook) ===
-                    group.originalQuery.trim();
-                const isCtaBlock =
-                  Boolean(rawCta) &&
-                  queryIndex ===
-                    panel.footageGroups.length - 1 &&
-                  (stripTranslation(rawCta) ===
-                    group.originalQuery.trim() ||
-                    rawCta === group.originalQuery.trim());
-                const displayText = isHookBlock
-                  ? rawHook
-                  : isCtaBlock
-                    ? rawCta
-                    : group.originalQuery;
-
-                return (
-                <div
-                  key={`${group.originalQuery}-${queryIndex}`}
-                >
-                  <div className="mb-2 space-y-1">
-                    <p className="text-xs leading-snug text-purple-200">
-                      {renderWithTranslation(displayText)}
-                    </p>
-                    <FootageQueryInput
-                      key={`${video.videoId}-${queryIndex}-${group.originalQuery}`}
-                      disabled={group.loading}
-                      onBlurCommit={(value) =>
-                        commitFootageQuery(
-                          video.videoId,
-                          queryIndex,
-                          value
-                        )
-                      }
-                      onSearch={(value) => {
-                        commitFootageQuery(
-                          video.videoId,
-                          queryIndex,
-                          value
-                        );
-                        void handleSearchFootageGroup(
-                          video.videoId,
-                          queryIndex,
-                          value
-                        );
+                {panel.aiImageGroups?.map((group, gi) => (
+                  <div key={gi} style={{ marginBottom: 32 }}>
+                    <p
+                      style={{
+                        fontWeight: "bold",
+                        fontSize: 14,
+                        marginBottom: 4,
                       }}
-                    />
-                  </div>
-
-                  {group.loading ? (
-                    <div className="flex justify-center py-4">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
-                    </div>
-                  ) : !activeVideo ? (
-                    <p className="text-xs text-purple-400/50">
-                      Видео не найдены
+                    >
+                      {group.originalText}
                     </p>
-                  ) : queryIndex === panel.openFootageIndex ? (
-                    <div className="space-y-2">
-                      <LazyFootageVideo
-                        videoUrl={activeVideo.url}
-                        poster={activeVideo.preview}
-                      />
-                      <FootageDurationLabel
-                        pexelsDuration={activeVideo.duration}
-                        estimatedDuration={
-                          segmentDurations?.[queryIndex] ?? null
-                        }
-                      />
-                      {group.videos.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCycleFootageVideo(
-                              video.videoId,
-                              queryIndex
-                            )
-                          }
-                          className="rounded-md border border-purple-800/60 px-3 py-1.5 text-xs text-purple-200 transition-colors hover:border-purple-600 hover:bg-purple-800/60"
+                    {group.translation && (
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: "#9ca3af",
+                          fontStyle: "italic",
+                          marginBottom: 8,
+                        }}
+                      >
+                        {group.translation}
+                      </p>
+                    )}
+
+                    <div style={{ display: "flex", gap: 12 }}>
+                      {group.slots.map((slot, si) => (
+                        <div
+                          key={si}
+                          style={{
+                            flex: 1,
+                            border: "1px solid #374151",
+                            borderRadius: 8,
+                            padding: 8,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                          }}
                         >
-                          Подобрать другой фрагмент
-                        </button>
-                      )}
+                          <input
+                            type="text"
+                            placeholder={group.originalText}
+                            value={slot.customPrompt ?? ""}
+                            onChange={(e) =>
+                              updateAISlot(video.videoId, gi, si, {
+                                customPrompt: e.target.value || null,
+                              })
+                            }
+                            style={{
+                              fontSize: 11,
+                              background: "#1f2937",
+                              border: "1px solid #4b5563",
+                              borderRadius: 4,
+                              padding: "4px 8px",
+                              color: "#f9fafb",
+                              width: "100%",
+                              boxSizing: "border-box",
+                            }}
+                          />
+
+                          <div
+                            style={{
+                              height: 96,
+                              borderRadius: 6,
+                              overflow: "hidden",
+                              background: "#111827",
+                            }}
+                          >
+                            {slot.loading && (
+                              <div
+                                style={{
+                                  height: "100%",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: "#6b7280",
+                                  fontSize: 12,
+                                }}
+                              >
+                                Генерация...
+                              </div>
+                            )}
+                            {slot.animatedVideoUrl && (
+                              <video
+                                src={slot.animatedVideoUrl}
+                                autoPlay
+                                loop
+                                muted
+                                playsInline
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "cover",
+                                }}
+                              />
+                            )}
+                            {slot.imageUrl &&
+                              !slot.animatedVideoUrl &&
+                              !slot.loading && (
+                                <img
+                                  src={slot.imageUrl}
+                                  alt=""
+                                  style={{
+                                    width: "100%",
+                                    height: "100%",
+                                    objectFit: "cover",
+                                  }}
+                                />
+                              )}
+                            {!slot.imageUrl && !slot.loading && (
+                              <div
+                                style={{
+                                  height: "100%",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: "#4b5563",
+                                  fontSize: 12,
+                                }}
+                              >
+                                нет картинки
+                              </div>
+                            )}
+                          </div>
+
+                          {slot.error && (
+                            <p
+                              style={{
+                                color: "#f87171",
+                                fontSize: 11,
+                                margin: 0,
+                              }}
+                            >
+                              {slot.error}
+                            </p>
+                          )}
+                          {slot.animateError && (
+                            <p
+                              style={{
+                                color: "#f87171",
+                                fontSize: 11,
+                                margin: 0,
+                              }}
+                            >
+                              {slot.animateError}
+                            </p>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleGenerateAIImage(
+                                video.videoId,
+                                gi,
+                                si
+                              )
+                            }
+                            disabled={slot.loading}
+                            style={{
+                              fontSize: 12,
+                              padding: "4px 8px",
+                              borderRadius: 4,
+                              border: "none",
+                              cursor: slot.loading
+                                ? "not-allowed"
+                                : "pointer",
+                              background: slot.loading
+                                ? "#374151"
+                                : "#2563eb",
+                              color: "#fff",
+                              opacity: slot.loading ? 0.6 : 1,
+                            }}
+                          >
+                            {slot.imageUrl
+                              ? "🔄 Перегенерировать"
+                              : "✨ Сгенерировать"}
+                          </button>
+
+                          {slot.imageUrl && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleAnimateAIImage(
+                                  video.videoId,
+                                  gi,
+                                  si
+                                )
+                              }
+                              disabled={slot.animating}
+                              style={{
+                                fontSize: 12,
+                                padding: "4px 8px",
+                                borderRadius: 4,
+                                border: "none",
+                                cursor: slot.animating
+                                  ? "not-allowed"
+                                  : "pointer",
+                                background: slot.animating
+                                  ? "#374151"
+                                  : "#7c3aed",
+                                color: "#fff",
+                                opacity: slot.animating ? 0.6 : 1,
+                              }}
+                            >
+                              {slot.animating
+                                ? "⏳ Оживляем..."
+                                : "🎬 Оживить"}
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <img
-                        src={activeVideo.preview}
-                        alt=""
-                        loading="lazy"
-                        onClick={() =>
-                          setScripts((prev) => ({
-                            ...prev,
-                            [video.videoId]: {
-                              ...prev[video.videoId],
-                              openFootageIndex: queryIndex,
-                            },
-                          }))
-                        }
-                        className="mx-auto max-w-[180px] aspect-[9/16] w-full cursor-pointer rounded-lg border border-purple-800/60 object-cover opacity-60 transition-opacity hover:opacity-100"
-                      />
-                      <FootageDurationLabel
-                        pexelsDuration={activeVideo.duration}
-                        estimatedDuration={
-                          segmentDurations?.[queryIndex] ?? null
-                        }
-                      />
-                    </div>
-                  )}
-                  {panel.audioChunks?.[queryIndex] && (
-                    <ChunkAudioPlayer blob={panel.audioChunks[queryIndex]} />
-                  )}
-                </div>
-                );
-              })}
-            </div>
+                  </div>
+                ))}
               </>
             )}
           </div>
