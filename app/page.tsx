@@ -2282,26 +2282,30 @@ function HomePage() {
         return bytes.buffer;
       };
 
-      const BATCH_SIZE = 10;
-      const audioBuffers: ArrayBuffer[] = [];
-      for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-        const batch = chunks.slice(i, i + BATCH_SIZE);
-        const batchResults = await Promise.all(batch.map(synthesizeChunk));
-        audioBuffers.push(...batchResults);
-        if (i + BATCH_SIZE < chunks.length) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-        setScripts((prev) => ({
-          ...prev,
-          [videoId]: {
-            ...prev[videoId],
-            voiceProgress: {
-              current: Math.min(i + BATCH_SIZE, chunks.length),
-              total: chunks.length,
+      const CONCURRENCY = 15;
+      const audioBuffers: ArrayBuffer[] = new Array(chunks.length);
+      const queue = chunks.map((chunk, i) => ({ chunk, i }));
+      let completed = 0;
+
+      const processQueue = async () => {
+        while (queue.length > 0) {
+          const item = queue.shift();
+          if (!item) return;
+          audioBuffers[item.i] = await synthesizeChunk(item.chunk);
+          completed++;
+          setScripts((prev) => ({
+            ...prev,
+            [videoId]: {
+              ...prev[videoId],
+              voiceProgress: { current: completed, total: chunks.length },
             },
-          },
-        }));
-      }
+          }));
+        }
+      };
+
+      await Promise.all(
+        Array.from({ length: CONCURRENCY }, () => processQueue())
+      );
 
       const audioContext = new AudioContext();
       const decodedBuffers = await Promise.all(
