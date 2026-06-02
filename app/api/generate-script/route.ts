@@ -183,12 +183,14 @@ function buildPrompt(
   const isLong = videoType === "long";
 
   const durationMin = videoDuration ? Math.round(videoDuration / 60) : null;
-  const durationInstruction = durationMin
-    ? `Длина оригинального видео: ${durationMin} минут. Создай сценарий примерно такой же длины (±10%).`
-    : `Создай полноценный сценарий для длинного YouTube видео (8-15 минут).`;
+  const targetWords = durationMin ? durationMin * 130 : 1300;
+  const targetSentences = durationMin ? durationMin * 8 : 80;
 
   const formatInstruction = isLong
-    ? `Создай полноценный сценарий для длинного YouTube видео. ${durationInstruction} Говори подробно, раскрывай каждый тезис, не сокращай. Сценарий должен быть рассчитан на ${durationMin ? durationMin + " минут" : "8-15 минут"} живой речи (~${durationMin ? durationMin * 130 : "1000-2000"} слов).`
+    ? `Создай ДЛИННЫЙ подробный сценарий для YouTube видео.
+ДЛИНА ОРИГИНАЛА: ${durationMin ? durationMin + " минут" : "длинное видео"}.
+ТРЕБОВАНИЕ: сценарий должен содержать МИНИМУМ ${targetWords} слов и МИНИМУМ ${targetSentences} предложений в sentences[].
+Раскрывай каждый факт подробно. Не сокращай. Добавляй детали, примеры, контекст.`
     : `Создай адаптированный сценарий для короткого видео (30-60 сек).`;
 
   const structureInstruction = isLong
