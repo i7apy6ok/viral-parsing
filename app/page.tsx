@@ -3169,6 +3169,16 @@ function HomePage() {
         >
           {isWorkspace ? "Сценарий для видео" : "Найди вирусное видео"}
         </h1>
+        {!isWorkspace && (
+          <div className="mb-6 flex justify-center">
+            <a
+              href="/my-video"
+              className="rounded-lg border border-purple-700/60 bg-purple-900/30 px-4 py-2 text-sm text-purple-300 transition-colors hover:border-purple-500 hover:bg-purple-800/40"
+            >
+              📹 Своё видео — создать сценарий без поиска
+            </a>
+          </div>
+        )}
 
         {isWorkspace ? (
           <div className="space-y-4">

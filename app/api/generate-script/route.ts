@@ -5,6 +5,7 @@ export const maxDuration = 120;
 type ScriptLanguage = "ru" | "en" | "es";
 
 type VideoType = "short" | "long";
+type ScriptProvider = "gemini" | "claude" | "groq";
 
 type GenerateScriptBody = {
   videoId: string;
@@ -13,6 +14,8 @@ type GenerateScriptBody = {
   offer?: string;
   language?: ScriptLanguage;
   videoType?: VideoType;
+  preferredProvider?: ScriptProvider;
+  transcript?: string;
 };
 
 export type ScriptResult = {
@@ -41,6 +44,13 @@ function normalizeLanguage(language: unknown): ScriptLanguage {
     return language;
   }
   return "ru";
+}
+
+function normalizeProvider(provider: unknown): ScriptProvider {
+  if (provider === "claude" || provider === "groq" || provider === "gemini") {
+    return provider;
+  }
+  return "gemini";
 }
 
 // ---------------------------------------------------------------------------
@@ -619,12 +629,13 @@ async function generateScript(
   title: string,
   offer: string | undefined,
   language: ScriptLanguage,
-  videoType: VideoType = "short"
+  videoType: VideoType = "short",
+  preferredProvider: ScriptProvider = "gemini",
+  clientTranscript?: string
 ): Promise<{
   result: Omit<ScriptResult, "transcriptUsed" | "provider">;
   provider: string;
 }> {
-  // Build prompt without transcript (for video-url path)
   const promptNoTranscript = buildPrompt(
     niche,
     title,
@@ -634,24 +645,11 @@ async function generateScript(
     videoType
   );
 
-  // 1. Gemini + video_url
-  if (process.env.OPENROUTER_API_KEY) {
-    try {
-      const result = await generateWithOpenRouter(videoId, promptNoTranscript);
-      return { result, provider: "gemini-2.5-flash" };
-    } catch (error) {
-      const isTimeout =
-        error instanceof Error && error.name === "AbortError";
-      console.warn(
-        `[orchestrator] Gemini video_url failed (timeout: ${isTimeout}): ${
-          error instanceof Error ? error.message : error
-        }, fetching transcript...`
-      );
-    }
-  }
+  const clientTx = clientTranscript?.trim() || null;
+  const fetchedTranscript =
+    clientTx === null ? await fetchTranscript(videoId) : null;
+  const transcript = clientTx ?? fetchedTranscript;
 
-  // Fetch transcript once — reuse for steps 2 and 3
-  const transcript = await fetchTranscript(videoId);
   const promptWithTranscript = buildPrompt(
     niche,
     title,
@@ -661,7 +659,46 @@ async function generateScript(
     videoType
   );
 
-  // 2. Gemini + transcript
+  if (preferredProvider === "groq") {
+    const result = await generateWithGroq(promptWithTranscript);
+    return { result, provider: "groq-llama-3.3-70b" };
+  }
+
+  if (preferredProvider === "claude") {
+    if (process.env.ANTHROPIC_API_KEY) {
+      try {
+        const result = await generateWithClaude(promptWithTranscript);
+        return { result, provider: "claude-sonnet-4-6" };
+      } catch (error) {
+        const isTimeout =
+          error instanceof Error && error.name === "AbortError";
+        console.warn(
+          `[orchestrator] Claude (preferred) failed (timeout: ${isTimeout}): ${
+            error instanceof Error ? error.message : error
+          }, trying Groq...`
+        );
+      }
+    }
+    const result = await generateWithGroq(promptWithTranscript);
+    return { result, provider: "groq-llama-3.3-70b" };
+  }
+
+  // preferredProvider === "gemini"
+  if (!clientTx && process.env.OPENROUTER_API_KEY) {
+    try {
+      const result = await generateWithOpenRouter(videoId, promptNoTranscript);
+      return { result, provider: "gemini-2.5-flash" };
+    } catch (error) {
+      const isTimeout =
+        error instanceof Error && error.name === "AbortError";
+      console.warn(
+        `[orchestrator] Gemini video_url failed (timeout: ${isTimeout}): ${
+          error instanceof Error ? error.message : error
+        }, trying transcript path...`
+      );
+    }
+  }
+
   if (process.env.OPENROUTER_API_KEY && transcript) {
     try {
       const result = await generateWithGeminiTranscript(
@@ -680,7 +717,6 @@ async function generateScript(
     }
   }
 
-  // 3. Claude + transcript (or title only if no transcript)
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const result = await generateWithClaude(promptWithTranscript);
@@ -696,7 +732,6 @@ async function generateScript(
     }
   }
 
-  // 4. Groq — last resort
   const result = await generateWithGroq(promptWithTranscript);
   return { result, provider: "groq-llama-3.3-70b" };
 }
@@ -714,8 +749,11 @@ export async function POST(request: Request) {
       offer,
       language: rawLanguage,
       videoType = "short",
+      preferredProvider: rawProvider,
+      transcript: clientTranscript,
     } = body;
     const language = normalizeLanguage(rawLanguage);
+    const preferredProvider = normalizeProvider(rawProvider);
 
     if (!videoId?.trim()) {
       return NextResponse.json({ error: "videoId is required" }, { status: 400 });
@@ -728,7 +766,7 @@ export async function POST(request: Request) {
     }
 
     console.log(
-      `[generate-script] videoId=${videoId}, niche=${niche}, lang=${language}`
+      `[generate-script] videoId=${videoId}, niche=${niche}, lang=${language}, provider=${preferredProvider}`
     );
 
     const { result, provider } = await generateScript(
@@ -737,7 +775,9 @@ export async function POST(request: Request) {
       title.trim(),
       offer,
       language,
-      videoType
+      videoType,
+      preferredProvider,
+      clientTranscript
     );
 
     return NextResponse.json({
