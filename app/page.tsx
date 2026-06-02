@@ -306,6 +306,15 @@ function getScriptSourceLabel(data: ScriptResult): string {
     : "Сценарий создан";
 }
 
+function getVoiceLoadingLabel(
+  progress: { current: number; total: number } | null | undefined
+): string {
+  if (progress && progress.total > 0) {
+    return `Озвучиваем... ${progress.current}/${progress.total}`;
+  }
+  return "Озвучиваем…";
+}
+
 function ChunkAudioPlayer({
   blob,
   className = "mt-2 h-8 w-full",
@@ -2238,34 +2247,49 @@ function HomePage() {
       const chunks = getSentenceChunks(script, selectedHook);
       if (chunks.length === 0) throw new Error("Нет текста для озвучки");
 
-      const audioBuffers = await Promise.all(
-        chunks.map(async (chunk) => {
-          const res = await fetch("/api/synthesize-voice", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: chunk }),
-          });
-          const data = (await res.json()) as {
-            error?: string;
-            audioBase64?: string;
-          };
-          if (!res.ok) {
-            throw new Error(
-              typeof data.error === "string"
-                ? data.error
-                : `Ошибка Voicer: ${res.status}`
-            );
-          }
-          if (!data.audioBase64) throw new Error("Озвучка не вернула аудио");
+      const synthesizeChunk = async (chunk: string): Promise<ArrayBuffer> => {
+        const res = await fetch("/api/synthesize-voice", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunk }),
+        });
+        const data = (await res.json()) as {
+          error?: string;
+          audioBase64?: string;
+        };
+        if (!res.ok) {
+          throw new Error(
+            typeof data.error === "string"
+              ? data.error
+              : `Ошибка Voicer: ${res.status}`
+          );
+        }
+        if (!data.audioBase64) throw new Error("Озвучка не вернула аудио");
+        const binary = atob(data.audioBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+      };
 
-          const binary = atob(data.audioBase64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-          }
-          return bytes.buffer;
-        })
-      );
+      const BATCH_SIZE = 5;
+      const audioBuffers: ArrayBuffer[] = [];
+      for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+        const batch = chunks.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(batch.map(synthesizeChunk));
+        audioBuffers.push(...batchResults);
+        setScripts((prev) => ({
+          ...prev,
+          [videoId]: {
+            ...prev[videoId],
+            voiceProgress: {
+              current: Math.min(i + BATCH_SIZE, chunks.length),
+              total: chunks.length,
+            },
+          },
+        }));
+      }
 
       const audioContext = new AudioContext();
       const decodedBuffers = await Promise.all(
@@ -2833,14 +2857,16 @@ function HomePage() {
         className="w-full rounded-md border border-purple-700 bg-purple-900/60 py-2 text-sm text-purple-50 transition-colors hover:border-purple-600 hover:bg-purple-800/60 disabled:opacity-60"
       >
         {panel.voiceLoading
-          ? "Озвучиваем…"
+          ? getVoiceLoadingLabel(panel.voiceProgress)
           : "🎙 Озвучить сценарий"}
       </button>
 
       {panel.voiceLoading && (
         <div className="flex items-center justify-center gap-3 py-2">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
-          <span className="text-xs text-purple-300/70">Озвучиваем…</span>
+          <span className="text-xs text-purple-300/70">
+            {getVoiceLoadingLabel(panel.voiceProgress)}
+          </span>
         </div>
       )}
 
