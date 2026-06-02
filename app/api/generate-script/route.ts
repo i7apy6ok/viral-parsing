@@ -367,13 +367,15 @@ function parseScriptResponse(
 // ---------------------------------------------------------------------------
 async function generateWithOpenRouter(
   videoId: string,
-  prompt: string
+  prompt: string,
+  videoType: VideoType = "short"
 ): Promise<Omit<ScriptResult, "transcriptUsed" | "provider">> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 110000);
+  const timeout = videoType === "long" ? 240000 : 110000;
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -447,13 +449,15 @@ async function generateWithOpenRouter(
 async function generateWithOpenRouterFile(
   prompt: string,
   videoBase64: string,
-  videoMimeType: string
+  videoMimeType: string,
+  videoType: VideoType = "short"
 ): Promise<Omit<ScriptResult, "transcriptUsed" | "provider">> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 110000);
+  const timeout = videoType === "long" ? 240000 : 110000;
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
   const dataUrl = `data:${videoMimeType};base64,${videoBase64}`;
 
   try {
@@ -607,7 +611,7 @@ async function generateWithClaude(
   const url = `${baseUrl}/v1/messages`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  const timeoutId = setTimeout(() => controller.abort(), 180000);
 
   try {
     const res = await fetch(url, {
@@ -619,7 +623,7 @@ async function generateWithClaude(
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: 2500,
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }],
       }),
       signal: controller.signal,
@@ -669,7 +673,7 @@ async function generateWithGroq(
   if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
 
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -680,7 +684,7 @@ async function generateWithGroq(
       },
       body: JSON.stringify({
         model: GROQ_MODEL,
-        max_tokens: 2500,
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }],
       }),
       signal: controller.signal,
@@ -781,6 +785,11 @@ async function generateScript(
         );
       }
     }
+    if (videoType === "long") {
+      throw new Error(
+        "Claude недоступен. Для длинного сценария используйте Gemini."
+      );
+    }
     const result = await generateWithGroq(promptWithTranscript);
     return { result, provider: "groq-llama-3.3-70b" };
   }
@@ -796,7 +805,8 @@ async function generateScript(
       const result = await generateWithOpenRouterFile(
         promptNoTranscript,
         videoBase64,
-        videoMimeType || "video/mp4"
+        videoMimeType || "video/mp4",
+        videoType
       );
       return { result, provider: "gemini-2.5-flash-file" };
     } catch (error) {
@@ -812,7 +822,11 @@ async function generateScript(
 
   if (!clientTx && !isUploadedFile && process.env.OPENROUTER_API_KEY) {
     try {
-      const result = await generateWithOpenRouter(videoId, promptNoTranscript);
+      const result = await generateWithOpenRouter(
+        videoId,
+        promptNoTranscript,
+        videoType
+      );
       return { result, provider: "gemini-2.5-flash" };
     } catch (error) {
       const isTimeout =
@@ -858,6 +872,11 @@ async function generateScript(
     }
   }
 
+  if (videoType === "long") {
+    throw new Error(
+      "Не удалось сгенерировать длинный сценарий: все провайдеры недоступны. Попробуйте Claude или Gemini."
+    );
+  }
   const result = await generateWithGroq(promptWithTranscript);
   return { result, provider: "groq-llama-3.3-70b" };
 }
