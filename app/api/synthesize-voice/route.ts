@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const maxDuration = 300;
+
 type SynthesizeBody = {
   text: string;
   voice_id?: string;
@@ -74,8 +76,11 @@ async function transcribeWithGroq(
 
 const VOICER_BASE_URL = "https://voiceapi.csv666.ru";
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
-const POLL_INTERVAL_MS = 2000;
-const MAX_POLL_ATTEMPTS = 30;
+const POLL_INTERVAL_MS = 3000;
+const MAX_POLL_ATTEMPTS = 60;
+const VOICER_FETCH_TIMEOUT_MS = 200_000;
+const VOICER_MAX_WAIT_SEC =
+  (MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 1000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -95,13 +100,33 @@ async function voicerFetch(
   attempt = 1
 ): Promise<Response> {
   const url = `${VOICER_BASE_URL}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "X-API-Key": apiKey,
-      ...options.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    VOICER_FETCH_TIMEOUT_MS
+  );
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "X-API-Key": apiKey,
+        ...options.headers,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new VoicerHttpError(
+        504,
+        `Превышено время ожидания ответа Voicer (${VOICER_FETCH_TIMEOUT_MS / 1000} сек)`
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   console.log(
     `Voicer ${options.method ?? "GET"} ${path} → ${res.status}${attempt > 1 ? ` (retry ${attempt})` : ""}`
@@ -217,7 +242,9 @@ export async function POST(request: Request) {
 
       if (attempt === MAX_POLL_ATTEMPTS) {
         return NextResponse.json(
-          { error: "Превышено время ожидания (60 сек)" },
+          {
+            error: `Превышено время ожидания (${VOICER_MAX_WAIT_SEC} сек)`,
+          },
           { status: 504 }
         );
       }
@@ -225,7 +252,9 @@ export async function POST(request: Request) {
 
     if (finalStatus !== "ending") {
       return NextResponse.json(
-        { error: "Превышено время ожидания (60 сек)" },
+        {
+          error: `Превышено время ожидания (${VOICER_MAX_WAIT_SEC} сек)`,
+        },
         { status: 504 }
       );
     }
