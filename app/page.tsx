@@ -2273,7 +2273,7 @@ function HomePage() {
         return bytes.buffer;
       };
 
-      const BATCH_SIZE = 5;
+      const BATCH_SIZE = 50;
       const audioBuffers: ArrayBuffer[] = [];
       for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
         const batch = chunks.slice(i, i + BATCH_SIZE);
