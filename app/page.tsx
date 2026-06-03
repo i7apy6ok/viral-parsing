@@ -283,7 +283,12 @@ function getSentenceChunks(
 
   const ctaClean = stripTranslation(script.cta);
 
-  return [hookClean, ...bodyChunks, ctaClean].filter(Boolean);
+  const hookSentences = hookClean
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return [...hookSentences, ...bodyChunks, ctaClean].filter(Boolean);
 }
 
 function resolveAudioChunkIndex(
@@ -2703,12 +2708,24 @@ function HomePage() {
       </button>
 
       {panel.voiceLoading && (
-        <div className="flex items-center justify-center gap-3 py-2">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
-          <span className="text-xs text-purple-300/70">
-            {getVoiceLoadingLabel(panel.voiceProgress)}
-          </span>
-        </div>
+        <>
+          <div className="flex items-center justify-center gap-3 py-2">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-800/60 border-t-purple-50" />
+            <span className="text-xs text-purple-300/70">
+              {getVoiceLoadingLabel(panel.voiceProgress)}
+            </span>
+          </div>
+          <p
+            style={{
+              fontSize: 11,
+              color: "#6b7280",
+              textAlign: "center",
+              marginTop: 4,
+            }}
+          >
+            По одному предложению для естественного звучания
+          </p>
+        </>
       )}
 
       {panel.voiceError && !panel.voiceLoading && (
