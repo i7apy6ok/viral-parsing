@@ -788,6 +788,18 @@ async function generateScript(
   ) {
     try {
       console.log("[generate-script] Fetching transcript for long video:", videoId);
+      console.log(
+        "[generate-script] MERGE_SERVICE_URL:",
+        process.env.MERGE_SERVICE_URL
+      );
+      console.log(
+        "[generate-script] NEXT_PUBLIC_APP_URL:",
+        process.env.NEXT_PUBLIC_APP_URL
+      );
+      console.log(
+        "[generate-script] Fetching transcript from:",
+        `${process.env.NEXT_PUBLIC_APP_URL}/api/transcribe`
+      );
       const appBase =
         process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
       const tRes = await fetch(`${appBase}/api/transcribe`, {
@@ -796,7 +808,12 @@ async function generateScript(
         body: JSON.stringify({ videoId }),
         signal: AbortSignal.timeout(250000),
       });
+      console.log("[generate-script] Transcript response status:", tRes.status);
       const tText = await tRes.text();
+      console.log(
+        "[generate-script] Transcript response body (first 200):",
+        tText.slice(0, 200)
+      );
       if (tRes.ok) {
         const tData = JSON.parse(tText) as { transcript?: string };
         autoTranscript = tData.transcript ?? null;
