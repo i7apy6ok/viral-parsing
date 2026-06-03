@@ -302,7 +302,12 @@ function normalizeVideoQueries(queries: unknown): string[] {
 function parseScriptResponse(
   text: string
 ): Omit<ScriptResult, "transcriptUsed" | "provider"> {
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  // Убираем markdown-блоки ```json ... ``` или ``` ... ```
+  const cleaned = text
+    .replace(/^```(?:json)?\s*/m, "")
+    .replace(/\s*```\s*$/m, "")
+    .trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]) as Partial<
