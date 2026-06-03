@@ -68,7 +68,6 @@ type AudioSegment = {
 };
 
 type ClipMode = "sentences" | "manual" | null;
-type VoiceMode = "sentences" | "whole";
 
 const MANUAL_SLOTS_PER_SENTENCE = 3;
 type ScriptLanguage = "ru" | "en" | "es";
@@ -108,7 +107,6 @@ type ScriptPanelState = {
   openFootageIndex: number | null;
   footageSearchStarted: boolean;
   footagePage: number;
-  voiceMode: VoiceMode;
 };
 
 const FOOTAGE_DEFAULTS = {
@@ -127,10 +125,6 @@ const FOOTAGE_DEFAULTS = {
   audioChunks: null,
   footageSearchStarted: false,
   footagePage: 0,
-};
-
-const VOICE_MODE_DEFAULTS = {
-  voiceMode: "sentences" as const,
 };
 
 const GROUPS_PER_PAGE = 10;
@@ -294,18 +288,6 @@ function getPreservedTranslation(text: string): string | null {
   }
   const translations = extractTranslations(text);
   return translations.length > 0 ? translations[translations.length - 1]! : null;
-}
-
-function formatVoiceScript(
-  script: ScriptResult,
-  selectedHook: number | null
-): string {
-  const hookIndex = getSelectedHookIndex(selectedHook);
-  const hook = script.hooks[hookIndex] ?? script.hooks[0] ?? "";
-  return [hook, script.body, script.cta]
-    .map(stripTranslation)
-    .filter(Boolean)
-    .join("\n\n");
 }
 
 function splitHookIntoSentences(hook: string): string[] {
@@ -1376,7 +1358,6 @@ function HomePage() {
         voiceAudioBlob: null,
         audioDuration: null,
         language: current?.language ?? "ru",
-        ...VOICE_MODE_DEFAULTS,
         ...FOOTAGE_DEFAULTS,
       },
     }));
@@ -1443,7 +1424,6 @@ function HomePage() {
           voiceAudioBlob: null,
           audioDuration: null,
           language: prev[id]?.language ?? "ru",
-          voiceMode: prev[id]?.voiceMode ?? "sentences",
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -1466,7 +1446,6 @@ function HomePage() {
           voiceAudioBlob: null,
           audioDuration: null,
           language: prev[id]?.language ?? "ru",
-          voiceMode: prev[id]?.voiceMode ?? "sentences",
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -2095,7 +2074,6 @@ function HomePage() {
     selectedHook: number | null
   ) => {
     const panel = scripts[videoId];
-    const voiceMode = panel?.voiceMode ?? "sentences";
     if (panel?.voiceAudioUrl) {
       URL.revokeObjectURL(panel.voiceAudioUrl);
     }
@@ -2110,16 +2088,12 @@ function HomePage() {
         voiceAudioBlob: null,
         audioDuration: null,
         language: prev[videoId]?.language ?? "ru",
-        voiceMode,
         ...FOOTAGE_DEFAULTS,
       },
     }));
 
     try {
-      const chunks =
-        voiceMode === "whole"
-          ? [formatVoiceScript(script, selectedHook)].filter(Boolean)
-          : getSentenceChunks(script, selectedHook);
+      const chunks = getSentenceChunks(script, selectedHook);
       if (chunks.length === 0) throw new Error("Нет текста для озвучки");
 
       const synthesizeChunk = async (
@@ -2616,7 +2590,6 @@ function HomePage() {
             voiceAudioBlob: null,
             audioDuration: null,
             language: "ru",
-            ...VOICE_MODE_DEFAULTS,
             ...FOOTAGE_DEFAULTS,
           },
         }));
@@ -2766,25 +2739,6 @@ function HomePage() {
         {panel.copiedAll ? "Скопировано!" : "Скопировать всё"}
       </button>
 
-      <ToggleGroup
-        label="Режим озвучки"
-        value={panel.voiceMode ?? "sentences"}
-        onChange={(mode) => {
-          if (mode !== "sentences" && mode !== "whole") return;
-          setScripts((prev) => ({
-            ...prev,
-            [video.videoId]: {
-              ...prev[video.videoId],
-              voiceMode: mode,
-            },
-          }));
-        }}
-        options={[
-          { value: "sentences", label: "По предложению" },
-          { value: "whole", label: "Целиком" },
-        ]}
-      />
-
       <button
         type="button"
         onClick={() =>
@@ -2810,18 +2764,16 @@ function HomePage() {
               {getVoiceLoadingLabel(panel.voiceProgress)}
             </span>
           </div>
-          {panel.voiceMode === "sentences" && (
-            <p
-              style={{
-                fontSize: 11,
-                color: "#6b7280",
-                textAlign: "center",
-                marginTop: 4,
-              }}
-            >
-              По одному предложению для естественного звучания
-            </p>
-          )}
+          <p
+            style={{
+              fontSize: 11,
+              color: "#6b7280",
+              textAlign: "center",
+              marginTop: 4,
+            }}
+          >
+            По одному предложению для естественного звучания
+          </p>
         </>
       )}
 
@@ -3579,7 +3531,6 @@ function HomePage() {
                             voiceAudioUrl: null,
                             voiceAudioBlob: null,
                             audioDuration: null,
-                            ...VOICE_MODE_DEFAULTS,
                             ...FOOTAGE_DEFAULTS,
                           }),
                           language,
