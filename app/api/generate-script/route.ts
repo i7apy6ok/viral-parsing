@@ -615,6 +615,7 @@ async function generateWithClaude(
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
 
+  const maxTokens = videoType === "long" ? 16000 : 8000;
   const baseUrl = process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com";
   const url = `${baseUrl}/v1/messages`;
 
@@ -631,7 +632,7 @@ async function generateWithClaude(
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
-        max_tokens: 8000,
+        max_tokens: maxTokens,
         messages: [{ role: "user", content: prompt }],
       }),
       signal: controller.signal,
@@ -773,6 +774,9 @@ async function generateScript(
     videoDuration
   );
 
+  const claudePrompt = transcript ? promptWithTranscript : promptNoTranscript;
+  const groqFallbackPrompt = promptWithTranscript ?? promptNoTranscript;
+
   if (preferredProvider === "groq") {
     const result = await generateWithGroq(promptWithTranscript);
     return { result, provider: "groq-llama-3.3-70b" };
@@ -781,7 +785,7 @@ async function generateScript(
   if (preferredProvider === "claude") {
     if (process.env.ANTHROPIC_API_KEY) {
       try {
-        const result = await generateWithClaude(promptWithTranscript);
+        const result = await generateWithClaude(claudePrompt, videoType);
         return { result, provider: "claude-sonnet-4-6" };
       } catch (error) {
         const isTimeout =
@@ -793,13 +797,8 @@ async function generateScript(
         );
       }
     }
-    if (videoType === "long") {
-      throw new Error(
-        "Claude недоступен. Для длинного сценария используйте Gemini."
-      );
-    }
-    const result = await generateWithGroq(promptWithTranscript);
-    return { result, provider: "groq-llama-3.3-70b" };
+    const result = await generateWithGroq(groqFallbackPrompt);
+    return { result, provider: "groq-llama-3.3-70b (fallback)" };
   }
 
   // preferredProvider === "gemini"
@@ -872,7 +871,7 @@ async function generateScript(
 
   if (process.env.ANTHROPIC_API_KEY) {
     try {
-      const result = await generateWithClaude(promptWithTranscript);
+      const result = await generateWithClaude(claudePrompt, videoType);
       return { result, provider: "claude-sonnet-4-6" };
     } catch (error) {
       const isTimeout =
@@ -885,13 +884,8 @@ async function generateScript(
     }
   }
 
-  if (videoType === "long") {
-    throw new Error(
-      "Не удалось сгенерировать длинный сценарий: все провайдеры недоступны. Попробуйте Claude или Gemini."
-    );
-  }
-  const result = await generateWithGroq(promptWithTranscript);
-  return { result, provider: "groq-llama-3.3-70b" };
+  const result = await generateWithGroq(groqFallbackPrompt);
+  return { result, provider: "groq-llama-3.3-70b (fallback)" };
 }
 
 // ---------------------------------------------------------------------------
