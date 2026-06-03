@@ -299,38 +299,42 @@ function normalizeVideoQueries(queries: unknown): string[] {
     .filter(Boolean);
 }
 
-function parseScriptResponse(text: string) {
-  // Убираем markdown-обёртку ```json ... ``` или ``` ... ```
-  const cleaned = text
-    .replace(/^```(?:json)?\s*\n?/m, "")
-    .replace(/\n?```\s*$/m, "")
+function parseScriptResponse(
+  text: string
+): Omit<ScriptResult, "transcriptUsed" | "provider"> {
+  // Шаг 1: чистим markdown-обёртку
+  let cleaned = text.trim();
+  cleaned = cleaned
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
     .trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
+
+  // Шаг 2: находим JSON-объект
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) {
+    const jsonStr = cleaned.slice(start, end + 1);
     try {
-      const jsonStr = jsonMatch[0];
-      const lastBrace = jsonStr.lastIndexOf("}");
-      const truncated =
-        lastBrace !== -1 ? jsonStr.slice(0, lastBrace + 1) : jsonStr;
-      const parsed = JSON.parse(truncated) as Partial<
+      const parsed = JSON.parse(jsonStr) as Partial<
         Omit<ScriptResult, "transcriptUsed" | "provider">
       >;
-      if (parsed.hooks && parsed.body && parsed.cta && parsed.visualHook) {
+      if (parsed.hooks && parsed.body && parsed.cta) {
         const body = String(parsed.body);
         return {
           hooks: parsed.hooks.slice(0, 3).map(String),
           body,
           cta: String(parsed.cta),
-          visualHook: String(parsed.visualHook),
+          visualHook: String(parsed.visualHook ?? ""),
           videoQueries: normalizeVideoQueries(parsed.videoQueries),
           sentences: normalizeSentences(parsed.sentences, body),
         };
       }
     } catch {
-      /* fallback to section parser */
+      // fallback ниже
     }
   }
 
+  // Шаг 3: fallback — regex по секциям
   const hookMatches = Array.from(
     text.matchAll(/Хук\s*\d[^:]*:\s*([^\n]+)/gi)
   ).map((m) => m[1].trim());
@@ -665,7 +669,9 @@ async function generateWithClaude(
       throw new Error(`Empty response from Claude: ${JSON.stringify(data)}`);
     }
 
-    console.log(`[Claude] OK, response length ${content.length}`);
+    console.log(
+      `[Claude] OK (${videoType}, max_tokens=${maxTokens}), response length ${content.length}`
+    );
     return parseScriptResponse(content);
   } finally {
     clearTimeout(timeoutId);
