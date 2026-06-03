@@ -609,7 +609,8 @@ async function generateWithGeminiTranscript(
 type ClaudeApiError = Error & { response?: { data?: unknown } };
 
 async function generateWithClaude(
-  prompt: string
+  prompt: string,
+  videoType: VideoType = "short"
 ): Promise<Omit<ScriptResult, "transcriptUsed" | "provider">> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
