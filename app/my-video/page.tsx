@@ -40,6 +40,7 @@ function MyVideoPage() {
   const [offer, setOffer] = useState("");
   const [provider, setProvider] = useState<ScriptProvider>("gemini");
   const [language, setLanguage] = useState<"ru" | "en" | "es">("ru");
+  const [videoType, setVideoType] = useState<"short" | "long">("long");
   const [loading, setLoading] = useState(false);
   const [script, setScript] = useState<ScriptResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,20 +91,40 @@ function MyVideoPage() {
           niche: niche.trim() || "общая тема",
           offer: offer.trim(),
           language,
+          videoType,
           preferredProvider: provider,
           transcript: transcriptOverride ?? (transcript.trim() || undefined),
           videoBase64: base64,
           videoMimeType: videoFile.type || "video/mp4",
         };
       } else {
+        let videoDuration: number | null = null;
+        if (videoId && !videoFile) {
+          try {
+            const durRes = await fetch(
+              `/api/search-youtube?videoId=${videoId}`
+            );
+            if (durRes.ok) {
+              const durData = (await durRes.json()) as {
+                durationSeconds?: number;
+              };
+              videoDuration = durData?.durationSeconds ?? null;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
         body = {
           videoId,
           title: url,
           niche: niche.trim() || "общая тема",
           offer: offer.trim(),
           language,
+          videoType,
           preferredProvider: provider,
           transcript: transcriptOverride ?? (transcript.trim() || undefined),
+          videoDuration: videoDuration ?? undefined,
         };
       }
 
@@ -285,6 +306,34 @@ function MyVideoPage() {
             placeholder="Например: книга за 390₽, подписка на канал"
             className="w-full rounded-lg border border-purple-900/50 bg-[#1a1035] px-4 py-3 text-sm text-zinc-100 placeholder-purple-400/30 outline-none focus:border-purple-600"
           />
+        </div>
+
+        <div className="mb-4">
+          <label className="mb-2 block text-sm text-purple-300/70">
+            Тип видео
+          </label>
+          <div className="flex gap-2">
+            {(["short", "long"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setVideoType(t)}
+                style={{
+                  background: videoType === t ? "#7c3aed" : "#1f2937",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "8px 16px",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                {t === "short"
+                  ? "🎬 Шортс (до 1 мин)"
+                  : "📺 Длинное (5-30 мин)"}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="mb-4">

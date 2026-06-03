@@ -380,6 +380,26 @@ function sortResults(results: ViralVideoResult[], sortBy: SortBy): void {
   results.sort(comparators[sortBy]);
 }
 
+export async function GET(request: Request) {
+  const videoId = new URL(request.url).searchParams.get("videoId")?.trim();
+  if (!videoId) {
+    return NextResponse.json({ error: "videoId is required" }, { status: 400 });
+  }
+
+  try {
+    const detailsById = await fetchVideoDetails([videoId]);
+    const details = detailsById.get(videoId);
+    if (!details) {
+      return NextResponse.json({ error: "Video not found" }, { status: 404 });
+    }
+    return NextResponse.json({ durationSeconds: details.durationSeconds });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Partial<SearchBody>;
