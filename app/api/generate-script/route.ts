@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type ScriptLanguage = "ru" | "en" | "es";
 
