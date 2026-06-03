@@ -3,7 +3,7 @@
 import { Suspense, useState } from "react";
 import type { ScriptResult } from "../api/generate-script/route";
 
-type ScriptProvider = "gemini" | "claude" | "groq";
+type ScriptProvider = "gemini" | "claude";
 
 const PROVIDER_OPTIONS: {
   value: ScriptProvider;
@@ -19,11 +19,6 @@ const PROVIDER_OPTIONS: {
     value: "claude",
     label: "Claude Sonnet",
     description: "Лучший для контента",
-  },
-  {
-    value: "groq",
-    label: "Groq Llama",
-    description: "Быстрый, бесплатный",
   },
 ];
 
@@ -44,91 +39,46 @@ function MyVideoPage() {
   const [loading, setLoading] = useState(false);
   const [script, setScript] = useState<ScriptResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [needsUpload, setNeedsUpload] = useState(false);
-  const [needsTranscript, setNeedsTranscript] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [copiedHook, setCopiedHook] = useState<number | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
   const videoId = extractVideoId(url);
 
-  async function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        resolve(result.split(",")[1] ?? "");
-      };
-      reader.onerror = () => reject(new Error("Ошибка чтения файла"));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function handleGenerate(transcriptOverride?: string) {
-    if (!videoId && !videoFile) {
-      setError("Введите ссылку на YouTube видео или загрузите файл");
+  async function handleGenerate() {
+    if (!videoId) {
+      setError("Введите ссылку на YouTube видео");
       return;
     }
     setLoading(true);
     setError(null);
     setScript(null);
-    setNeedsUpload(false);
-    setNeedsTranscript(false);
 
     try {
-      let body: Record<string, unknown>;
-
-      if (videoFile) {
-        const sizeMb = videoFile.size / 1024 / 1024;
-        if (sizeMb > 50) {
-          throw new Error(
-            "Файл слишком большой (максимум 50 МБ). Используйте ссылку на YouTube."
-          );
+      let videoDuration: number | null = null;
+      try {
+        const durRes = await fetch(`/api/search-youtube?videoId=${videoId}`);
+        if (durRes.ok) {
+          const durData = (await durRes.json()) as {
+            durationSeconds?: number;
+          };
+          videoDuration = durData?.durationSeconds ?? null;
         }
-        const base64 = await fileToBase64(videoFile);
-        body = {
-          videoId: `file_${Date.now()}`,
-          title: videoFile.name,
-          niche: niche.trim() || "общая тема",
-          offer: offer.trim(),
-          language,
-          videoType,
-          preferredProvider: provider,
-          transcript: transcriptOverride ?? (transcript.trim() || undefined),
-          videoBase64: base64,
-          videoMimeType: videoFile.type || "video/mp4",
-        };
-      } else {
-        let videoDuration: number | null = null;
-        if (videoId && !videoFile) {
-          try {
-            const durRes = await fetch(
-              `/api/search-youtube?videoId=${videoId}`
-            );
-            if (durRes.ok) {
-              const durData = (await durRes.json()) as {
-                durationSeconds?: number;
-              };
-              videoDuration = durData?.durationSeconds ?? null;
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-
-        body = {
-          videoId,
-          title: url,
-          niche: niche.trim() || "общая тема",
-          offer: offer.trim(),
-          language,
-          videoType,
-          preferredProvider: provider,
-          transcript: transcriptOverride ?? (transcript.trim() || undefined),
-          videoDuration: videoDuration ?? undefined,
-        };
+      } catch {
+        /* ignore */
       }
+
+      const body = {
+        videoId,
+        title: url,
+        niche: niche.trim() || "общая тема",
+        offer: offer.trim(),
+        language,
+        videoType,
+        preferredProvider: provider,
+        transcript: transcript.trim() || undefined,
+        videoDuration: videoDuration ?? undefined,
+      };
 
       const res = await fetch("/api/generate-script", {
         method: "POST",
@@ -145,33 +95,14 @@ function MyVideoPage() {
         throw new Error(data.error ?? "Ошибка генерации сценария");
       }
 
-      if (
-        !data.transcriptUsed &&
-        provider === "gemini" &&
-        !transcriptOverride &&
-        !transcript &&
-        !videoFile
-      ) {
-        setNeedsUpload(true);
-      }
-
-      if (
-        data.provider?.toLowerCase().includes("groq") &&
-        videoType === "long"
-      ) {
-        setNeedsTranscript(true);
-      }
-
       setScript(data);
 
-      const fakeVideoId = String(body.videoId ?? videoId ?? `file_${Date.now()}`);
+      const fakeVideoId = String(body.videoId ?? videoId);
       const workspacePayload = {
         video: {
           videoId: fakeVideoId,
-          title: videoFile ? videoFile.name : url,
-          thumbnail: videoId
-            ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`
-            : "",
+          title: url,
+          thumbnail: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
           viewCount: 0,
           likeCount: 0,
           commentCount: 0,
@@ -179,7 +110,7 @@ function MyVideoPage() {
           channelAge: "",
           viralScore: 0,
           velocity: 0,
-          url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : "",
+          url: `https://www.youtube.com/watch?v=${videoId}`,
           platform: "youtube" as const,
           durationSeconds: 0,
         },
@@ -196,9 +127,6 @@ function MyVideoPage() {
       console.error("generate-script failed:", err);
       const msg = err instanceof Error ? err.message : "Ошибка генерации";
       setError(msg);
-      if (videoType === "long" && videoId && !videoFile) {
-        setNeedsTranscript(true);
-      }
     } finally {
       setLoading(false);
     }
@@ -233,10 +161,12 @@ function MyVideoPage() {
             ← Назад к поиску
           </a>
           <h1 className="text-2xl font-bold text-zinc-100">Своё видео</h1>
-          <p className="mt-1 text-sm text-purple-300/60">
-            Вставь ссылку на YouTube видео — нейросеть создаст сценарий
-          </p>
         </div>
+
+        <p style={{ color: "#9ca3af", fontSize: 14, marginBottom: 24 }}>
+          Вставь ссылку на YouTube видео. Для длинных видео добавь транскрипт —
+          сценарий получится точнее.
+        </p>
 
         <div className="mb-4">
           <label className="mb-1.5 block text-sm text-purple-300/70">
@@ -254,46 +184,66 @@ function MyVideoPage() {
           )}
         </div>
 
-        {/* OR divider */}
-        <div className="mb-4 flex items-center gap-3">
-          <div className="h-px flex-1 bg-purple-900/50" />
-          <span className="text-sm font-medium text-purple-400/60">ИЛИ</span>
-          <div className="h-px flex-1 bg-purple-900/50" />
-        </div>
-
-        {/* File upload */}
-        <div className="mb-6">
-          <label className="mb-1.5 block text-sm text-purple-300/70">
-            Загрузить видео
+        <div style={{ marginTop: 16, marginBottom: 24 }}>
+          <label
+            style={{
+              fontSize: 14,
+              color: "#d1d5db",
+              display: "block",
+              marginBottom: 8,
+            }}
+          >
+            Транскрипт видео (необязательно, но рекомендуется для длинных)
           </label>
-          <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-purple-700/60 bg-[#1a1035] py-4 text-sm text-purple-300/70 transition-colors hover:border-purple-500 hover:bg-purple-900/20">
-            <span>📁</span>
-            <span>
-              {videoFile ? videoFile.name : "Выбрать файл (mp4, mov, avi)"}
-            </span>
-            <input
-              type="file"
-              accept="video/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0] ?? null;
-                setVideoFile(file);
-                if (file) setUrl("");
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <a
+              href="https://tubetranscript.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontSize: 12,
+                color: "#a78bfa",
+                textDecoration: "underline",
               }}
-            />
-          </label>
-          {videoFile && (
-            <button
-              type="button"
-              onClick={() => setVideoFile(null)}
-              className="mt-1 text-xs text-purple-400/50 hover:text-purple-300"
             >
-              ✕ Убрать файл
-            </button>
-          )}
+              Открыть tubetranscript.com ↗
+            </a>
+            {url && (
+              <button
+                type="button"
+                onClick={() => void navigator.clipboard.writeText(url)}
+                style={{
+                  fontSize: 12,
+                  color: "#9ca3af",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Скопировать ссылку на видео
+              </button>
+            )}
+          </div>
+          <textarea
+            placeholder="Вставь транскрипт сюда..."
+            value={transcript}
+            onChange={(e) => setTranscript(e.target.value)}
+            rows={4}
+            style={{
+              width: "100%",
+              background: "#1f2937",
+              border: "1px solid #374151",
+              borderRadius: 8,
+              padding: 12,
+              color: "#f9fafb",
+              fontSize: 13,
+              resize: "vertical",
+              boxSizing: "border-box",
+            }}
+          />
         </div>
 
-        {/* Niche */}
         <div className="mb-4">
           <label className="mb-1.5 block text-sm text-purple-300/70">
             Ниша / тема (необязательно)
@@ -307,7 +257,6 @@ function MyVideoPage() {
           />
         </div>
 
-        {/* Offer */}
         <div className="mb-6">
           <label className="mb-1.5 block text-sm text-purple-300/70">
             Ваш оффер (необязательно)
@@ -353,7 +302,7 @@ function MyVideoPage() {
           <label className="mb-2 block text-sm text-purple-300/70">
             Нейросеть-сценарист
           </label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {PROVIDER_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
@@ -403,65 +352,16 @@ function MyVideoPage() {
         <button
           type="button"
           onClick={() => void handleGenerate()}
-          disabled={loading || (!url.trim() && !videoFile)}
+          disabled={loading || !url.trim()}
           className="mb-6 w-full rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 py-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
         >
-          {loading
-            ? "Генерируем сценарий…"
-            : videoFile
-              ? `Создать сценарий по файлу: ${videoFile.name.slice(0, 30)}`
-              : "Создать сценарий"}
+          {loading ? "Генерируем сценарий…" : "Создать сценарий"}
         </button>
 
         {error && (
           <p className="mb-4 rounded-lg border border-red-500/30 bg-red-900/20 px-4 py-3 text-sm text-red-400">
             {error}
           </p>
-        )}
-
-        {(needsUpload || needsTranscript) && (script || needsTranscript) && (
-          <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-900/10 px-4 py-4">
-            <p className="mb-3 text-sm text-amber-300">
-              ⚠️ Gemini не смогла просмотреть видео напрямую. Сценарий создан по
-              названию. Для лучшего результата добавь транскрипт вручную:
-            </p>
-            <div className="mb-3 flex gap-2">
-              <a
-                href="https://tubetranscript.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 hover:bg-amber-900/30"
-              >
-                Открыть tubetranscript.com ↗
-              </a>
-              <button
-                type="button"
-                onClick={() =>
-                  void navigator.clipboard.writeText(
-                    `https://www.youtube.com/watch?v=${videoId}`
-                  )
-                }
-                className="rounded border border-purple-700 px-3 py-1.5 text-xs text-purple-300 hover:bg-purple-900/30"
-              >
-                Скопировать ссылку на видео
-              </button>
-            </div>
-            <textarea
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Вставь транскрипт сюда…"
-              rows={5}
-              className="mb-3 w-full rounded-lg border border-purple-900/50 bg-[#1a1035] px-3 py-2 text-sm text-zinc-100 placeholder-purple-400/30 outline-none focus:border-purple-600"
-            />
-            <button
-              type="button"
-              onClick={() => void handleGenerate(transcript)}
-              disabled={loading || !transcript.trim()}
-              className="w-full rounded-lg border border-fuchsia-600 py-2 text-sm text-fuchsia-300 transition-colors hover:bg-fuchsia-900/30 disabled:opacity-40"
-            >
-              Пересоздать сценарий по транскрипту
-            </button>
-          </div>
         )}
 
         {script && (
