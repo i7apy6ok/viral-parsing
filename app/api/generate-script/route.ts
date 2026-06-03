@@ -346,6 +346,10 @@ function parseScriptResponse(
     } catch {
       // fallback ниже
     }
+  } else {
+    console.log(
+      "[parse] no valid JSON brackets found, falling back to regex"
+    );
   }
 
   // Шаг 3: fallback — regex по секциям
