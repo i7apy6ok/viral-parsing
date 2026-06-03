@@ -155,6 +155,16 @@ class VoicerHttpError extends Error {
   }
 }
 
+async function parseVoicerJson<T>(res: Response): Promise<T | null> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    console.error("[synthesize-voice] Non-JSON response:", text.slice(0, 200));
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Partial<SynthesizeBody>;
@@ -193,7 +203,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const createData = (await createRes.json()) as CreateTaskResponse;
+    const createData = await parseVoicerJson<CreateTaskResponse>(createRes);
+    if (!createData) {
+      return NextResponse.json({ error: "upstream error" }, { status: 502 });
+    }
     const taskId = createData.task_id ?? createData.id;
 
     if (!taskId) {
@@ -223,7 +236,10 @@ export async function POST(request: Request) {
         );
       }
 
-      const statusData = (await statusRes.json()) as TaskStatusResponse;
+      const statusData = await parseVoicerJson<TaskStatusResponse>(statusRes);
+      if (!statusData) {
+        return NextResponse.json({ error: "upstream error" }, { status: 502 });
+      }
       finalStatus = statusData.status;
       console.log(
         `Voicer poll ${attempt}/${MAX_POLL_ATTEMPTS}: status=${finalStatus}`

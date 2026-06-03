@@ -2046,37 +2046,53 @@ function HomePage() {
 
       const synthesizeChunk = async (
         chunk: string,
+        chunkIndex: number,
         attempt = 1
       ): Promise<ArrayBuffer> => {
-        const res = await fetch("/api/synthesize-voice", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: chunk }),
-        });
-        const data = (await res.json()) as {
-          error?: string;
-          audioBase64?: string;
-        };
-        if (res.status === 429 && attempt < 6) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, 3000 * attempt)
-          );
-          return synthesizeChunk(chunk, attempt + 1);
+        try {
+          const res = await fetch("/api/synthesize-voice", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: chunk }),
+          });
+          const rawText = await res.text();
+          let data: { error?: string; audioBase64?: string };
+          try {
+            data = JSON.parse(rawText) as {
+              error?: string;
+              audioBase64?: string;
+            };
+          } catch {
+            console.error(
+              `Chunk ${chunkIndex} non-JSON:`,
+              rawText.slice(0, 200)
+            );
+            return new ArrayBuffer(0);
+          }
+          if (res.status === 429 && attempt < 6) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, 3000 * attempt)
+            );
+            return synthesizeChunk(chunk, chunkIndex, attempt + 1);
+          }
+          if (!res.ok) {
+            throw new Error(
+              typeof data.error === "string"
+                ? data.error
+                : `Ошибка Voicer: ${res.status}`
+            );
+          }
+          if (!data.audioBase64) throw new Error("Озвучка не вернула аудио");
+          const binary = atob(data.audioBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let j = 0; j < binary.length; j++) {
+            bytes[j] = binary.charCodeAt(j);
+          }
+          return bytes.buffer;
+        } catch (err) {
+          console.error(`Chunk ${chunkIndex} failed:`, err);
+          return new ArrayBuffer(0);
         }
-        if (!res.ok) {
-          throw new Error(
-            typeof data.error === "string"
-              ? data.error
-              : `Ошибка Voicer: ${res.status}`
-          );
-        }
-        if (!data.audioBase64) throw new Error("Озвучка не вернула аудио");
-        const binary = atob(data.audioBase64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        return bytes.buffer;
       };
 
       const CONCURRENCY = 15;
@@ -2088,7 +2104,7 @@ function HomePage() {
         while (queue.length > 0) {
           const item = queue.shift();
           if (!item) return;
-          audioBuffers[item.i] = await synthesizeChunk(item.chunk);
+          audioBuffers[item.i] = await synthesizeChunk(item.chunk, item.i);
           completed++;
           setScripts((prev) => ({
             ...prev,
@@ -2106,13 +2122,32 @@ function HomePage() {
 
       const audioContext = new AudioContext();
       const decodedBuffers = await Promise.all(
-        audioBuffers.map((buf) => audioContext.decodeAudioData(buf.slice(0)))
+        audioBuffers.map(async (buf, i) => {
+          if (buf.byteLength === 0) {
+            console.warn(`Chunk ${i} skipped (no audio)`);
+            return null;
+          }
+          try {
+            return await audioContext.decodeAudioData(buf.slice(0));
+          } catch (decodeErr) {
+            console.error(`Chunk ${i} decode failed:`, decodeErr);
+            return null;
+          }
+        })
       );
-      const chunkDurations = decodedBuffers.map((b) => b.duration);
+
+      const validDecoded = decodedBuffers.filter(
+        (b): b is AudioBuffer => b !== null
+      );
+      if (validDecoded.length === 0) {
+        throw new Error("Не удалось озвучить ни одного чанка");
+      }
+
+      const chunkDurations = decodedBuffers.map((b) => b?.duration ?? 0);
       const totalDuration = chunkDurations.reduce((a, b) => a + b, 0);
 
-      const sampleRate = decodedBuffers[0].sampleRate;
-      const numberOfChannels = decodedBuffers[0].numberOfChannels;
+      const sampleRate = validDecoded[0].sampleRate;
+      const numberOfChannels = validDecoded[0].numberOfChannels;
       const totalSamples = Math.ceil(totalDuration * sampleRate);
       const combined = audioContext.createBuffer(
         numberOfChannels,
@@ -2121,6 +2156,7 @@ function HomePage() {
       );
       let offset = 0;
       for (const buf of decodedBuffers) {
+        if (!buf) continue;
         for (let ch = 0; ch < numberOfChannels; ch++) {
           combined.getChannelData(ch).set(buf.getChannelData(ch), offset);
         }
@@ -2131,7 +2167,9 @@ function HomePage() {
       const wavBlob = audioBufferToWav(combined);
 
       // Сохраняем каждый чанк как отдельный WAV blob
-      const audioChunkBlobs = decodedBuffers.map((buf) => audioBufferToWav(buf));
+      const audioChunkBlobs = decodedBuffers.map((buf) =>
+        buf ? audioBufferToWav(buf) : new Blob()
+      );
 
       const audioSegments: AudioSegment[] = [];
       let cursor = 0;
