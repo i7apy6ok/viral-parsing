@@ -148,6 +148,10 @@ def fetch_transcript_with_whisper(video_id: str) -> str | None:
             url,
         ]
 
+        print(
+            f"[transcript] Starting yt-dlp for {video_id}, cmd: {' '.join(cmd[:5])}"
+        )
+
         result = subprocess.run(
             cmd,
             capture_output=True,
