@@ -496,7 +496,7 @@ async function generateWithOpenRouterFile(
       },
       body: JSON.stringify({
         model: GEMINI_MODEL,
-        max_tokens: 16000,
+        max_tokens: 32000,
         messages: [
           {
             role: "user",
@@ -574,7 +574,7 @@ async function generateWithGeminiTranscript(
       },
       body: JSON.stringify({
         model: GEMINI_MODEL,
-        max_tokens: 2500,
+        max_tokens: 32000,
         messages: [
           {
             role: "user",
