@@ -156,8 +156,8 @@ function MyVideoPage() {
       }
 
       if (
-        data.provider?.includes("groq") ||
-        data.provider?.includes("fallback")
+        data.provider?.toLowerCase().includes("groq") &&
+        videoType === "long"
       ) {
         setNeedsTranscript(true);
       }
@@ -194,7 +194,11 @@ function MyVideoPage() {
       window.location.href = `/?workspace=1&v=${fakeVideoId}`;
     } catch (err) {
       console.error("generate-script failed:", err);
-      setError(err instanceof Error ? err.message : "Ошибка генерации");
+      const msg = err instanceof Error ? err.message : "Ошибка генерации";
+      setError(msg);
+      if (videoType === "long" && videoId && !videoFile) {
+        setNeedsTranscript(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -415,7 +419,7 @@ function MyVideoPage() {
           </p>
         )}
 
-        {(needsUpload || needsTranscript) && script && (
+        {(needsUpload || needsTranscript) && (script || needsTranscript) && (
           <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-900/10 px-4 py-4">
             <p className="mb-3 text-sm text-amber-300">
               ⚠️ Gemini не смогла просмотреть видео напрямую. Сценарий создан по
