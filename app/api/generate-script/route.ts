@@ -318,7 +318,18 @@ function parseScriptResponse(
       const parsed = JSON.parse(jsonStr) as Partial<
         Omit<ScriptResult, "transcriptUsed" | "provider">
       >;
-      if (parsed.hooks && parsed.body && parsed.cta) {
+      console.log("[parseScriptResponse] parsed keys:", Object.keys(parsed));
+      console.log(
+        "[parseScriptResponse] hooks type:",
+        typeof parsed.hooks,
+        Array.isArray(parsed.hooks)
+      );
+      if (
+        Array.isArray(parsed.hooks) &&
+        parsed.hooks.length > 0 &&
+        parsed.body &&
+        parsed.cta
+      ) {
         const body = String(parsed.body);
         return {
           hooks: parsed.hooks.slice(0, 3).map(String),
