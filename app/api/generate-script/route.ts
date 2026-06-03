@@ -766,21 +766,59 @@ async function generateScript(
   );
 
   const clientTx = clientTranscript?.trim() || null;
+
+  let autoTranscript: string | null = null;
+  if (
+    videoType === "long" &&
+    !clientTx &&
+    !isUploadedFile &&
+    videoId &&
+    !videoId.startsWith("file_")
+  ) {
+    try {
+      console.log("[generate-script] Fetching transcript for long video:", videoId);
+      const appBase =
+        process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+      const tRes = await fetch(`${appBase}/api/transcribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId }),
+        signal: AbortSignal.timeout(250000),
+      });
+      const tText = await tRes.text();
+      if (tRes.ok) {
+        const tData = JSON.parse(tText) as { transcript?: string };
+        autoTranscript = tData.transcript ?? null;
+        console.log(
+          "[generate-script] Got transcript, length:",
+          autoTranscript?.length
+        );
+      }
+    } catch (e) {
+      console.log("[generate-script] Transcript fetch failed:", e);
+    }
+  }
+
   const fetchedTranscript =
-    clientTx === null && !isUploadedFile ? await fetchTranscript(videoId) : null;
-  const transcript = clientTx ?? fetchedTranscript;
+    clientTx === null && !isUploadedFile && !autoTranscript
+      ? await fetchTranscript(videoId)
+      : null;
+
+  const effectiveTranscript = clientTx ?? autoTranscript ?? fetchedTranscript;
 
   const promptWithTranscript = buildPrompt(
     niche,
     title,
     offer,
     language,
-    transcript ?? undefined,
+    effectiveTranscript ?? undefined,
     videoType,
     videoDuration
   );
 
-  const claudePrompt = transcript ? promptWithTranscript : promptNoTranscript;
+  const claudePrompt = effectiveTranscript
+    ? promptWithTranscript
+    : promptNoTranscript;
   const groqFallbackPrompt = promptWithTranscript ?? promptNoTranscript;
 
   if (preferredProvider === "groq") {
@@ -857,10 +895,10 @@ async function generateScript(
     }
   }
 
-  if (process.env.OPENROUTER_API_KEY && transcript) {
+  if (process.env.OPENROUTER_API_KEY && effectiveTranscript) {
     try {
       const result = await generateWithGeminiTranscript(
-        transcript,
+        effectiveTranscript,
         promptWithTranscript
       );
       return { result, provider: "gemini-2.5-flash-transcript" };
