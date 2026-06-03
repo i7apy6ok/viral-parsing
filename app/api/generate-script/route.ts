@@ -308,7 +308,11 @@ function parseScriptResponse(text: string) {
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
-      const parsed = JSON.parse(jsonMatch[0]) as Partial<
+      const jsonStr = jsonMatch[0];
+      const lastBrace = jsonStr.lastIndexOf("}");
+      const truncated =
+        lastBrace !== -1 ? jsonStr.slice(0, lastBrace + 1) : jsonStr;
+      const parsed = JSON.parse(truncated) as Partial<
         Omit<ScriptResult, "transcriptUsed" | "provider">
       >;
       if (parsed.hooks && parsed.body && parsed.cta && parsed.visualHook) {
