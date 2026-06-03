@@ -299,13 +299,11 @@ function normalizeVideoQueries(queries: unknown): string[] {
     .filter(Boolean);
 }
 
-function parseScriptResponse(
-  text: string
-): Omit<ScriptResult, "transcriptUsed" | "provider"> {
-  // Убираем markdown-блоки ```json ... ``` или ``` ... ```
+function parseScriptResponse(text: string) {
+  // Убираем markdown-обёртку ```json ... ``` или ``` ... ```
   const cleaned = text
-    .replace(/^```(?:json)?\s*/m, "")
-    .replace(/\s*```\s*$/m, "")
+    .replace(/^```(?:json)?\s*\n?/m, "")
+    .replace(/\n?```\s*$/m, "")
     .trim();
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
