@@ -35,6 +35,7 @@ export type ScriptResult = {
 const CLAUDE_MODEL = "claude-sonnet-4-6";
 const GROQ_MODEL = "llama-3.3-70b-versatile";
 const GEMINI_MODEL = "google/gemini-2.5-flash";
+const MAX_TRANSCRIPT_CHARS = 40000;
 
 const LANGUAGE_LABELS: Record<ScriptLanguage, string> = {
   ru: "русский",
@@ -558,14 +559,16 @@ async function generateWithOpenRouterFile(
 // Provider 2: Gemini via OpenRouter + transcript (SECONDARY)
 // ---------------------------------------------------------------------------
 async function generateWithGeminiTranscript(
+  prompt: string,
   transcript: string,
-  prompt: string
+  videoType: VideoType = "short"
 ): Promise<Omit<ScriptResult, "transcriptUsed" | "provider">> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 40000);
+  const timeout = videoType === "long" ? 180000 : 40000;
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -848,17 +851,23 @@ async function generateScript(
 
   const effectiveTranscript = clientTx ?? autoTranscript ?? fetchedTranscript;
 
+  const trimmedTranscript =
+    effectiveTranscript && effectiveTranscript.length > MAX_TRANSCRIPT_CHARS
+      ? effectiveTranscript.slice(0, MAX_TRANSCRIPT_CHARS) +
+        "\n[транскрипт обрезан]"
+      : effectiveTranscript;
+
   const promptWithTranscript = buildPrompt(
     niche,
     title,
     offer,
     language,
-    effectiveTranscript ?? undefined,
+    trimmedTranscript ?? undefined,
     videoType,
     videoDuration
   );
 
-  const claudePrompt = effectiveTranscript
+  const claudePrompt = trimmedTranscript
     ? promptWithTranscript
     : promptNoTranscript;
   const groqFallbackPrompt = promptWithTranscript ?? promptNoTranscript;
@@ -937,11 +946,12 @@ async function generateScript(
     }
   }
 
-  if (process.env.OPENROUTER_API_KEY && effectiveTranscript) {
+  if (process.env.OPENROUTER_API_KEY && trimmedTranscript) {
     try {
       const result = await generateWithGeminiTranscript(
-        effectiveTranscript,
-        promptWithTranscript
+        promptWithTranscript,
+        trimmedTranscript,
+        videoType
       );
       return { result, provider: "gemini-2.5-flash-transcript" };
     } catch (error) {

@@ -51,22 +51,20 @@ class TranscriptRequest(BaseModel):
 
 def parse_vtt(content: str) -> str:
     """Extract plain text from WebVTT, without timestamps."""
-    parts: list[str] = []
+    lines: list[str] = []
 
     for raw_line in content.splitlines():
         line = raw_line.strip()
-        if not line or line.upper() == "WEBVTT" or line.startswith("NOTE"):
+        if not line or line.startswith("WEBVTT") or "-->" in line:
             continue
-        if "-->" in line:
-            continue
-        if re.fullmatch(r"\d+", line):
+        if line.startswith("NOTE") or line.isdigit():
             continue
 
         line = re.sub(r"<[^>]+>", "", line).strip()
         if line:
-            parts.append(line)
+            lines.append(line)
 
-    text = " ".join(parts)
+    text = " ".join(lines)
     return re.sub(r"\s+", " ", text).strip()
 
 
