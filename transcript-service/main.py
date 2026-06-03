@@ -214,6 +214,7 @@ def health():
 
 @app.post("/transcript")
 def transcript(body: TranscriptRequest):
+    print(f"[transcript] Request received for videoId: {body.videoId}")
     video_id = body.videoId.strip()
 
     if not re.fullmatch(r"[\w-]{6,}", video_id):
