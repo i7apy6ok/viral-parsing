@@ -106,6 +106,7 @@ type ScriptPanelState = {
   mergeError: string | null;
   openFootageIndex: number | null;
   footageSearchStarted: boolean;
+  footagePage: number;
 };
 
 const FOOTAGE_DEFAULTS = {
@@ -123,7 +124,41 @@ const FOOTAGE_DEFAULTS = {
   audioSegments: null,
   audioChunks: null,
   footageSearchStarted: false,
+  footagePage: 0,
 };
+
+const GROUPS_PER_PAGE = 10;
+
+function ShowMoreButton({
+  current,
+  total,
+  onMore,
+}: {
+  current: number;
+  total: number;
+  onMore: () => void;
+}) {
+  if (current >= total) return null;
+  return (
+    <button
+      type="button"
+      onClick={onMore}
+      style={{
+        width: "100%",
+        padding: "10px",
+        marginTop: 16,
+        background: "#1f2937",
+        border: "1px solid #374151",
+        borderRadius: 8,
+        color: "#9ca3af",
+        cursor: "pointer",
+        fontSize: 14,
+      }}
+    >
+      Показать ещё {total - current} предложений
+    </button>
+  );
+}
 
 const WORKSPACE_STORAGE_KEY = (videoId: string) =>
   `viral-parsing:workspace:${videoId}`;
@@ -1084,6 +1119,7 @@ function ManualFootageSlot({
 function ManualFootageSection({
   videoId,
   panel,
+  groups,
   slotInputRefs,
   onBlurCommit,
   onSearch,
@@ -1111,6 +1147,7 @@ function ManualFootageSection({
     value: number
   ) => void;
   onCycleVideo: (groupIndex: number, slotIndex: number) => void;
+  groups: ManualGroup[];
 }) {
   const language = panel.language ?? "ru";
   const manualCalculated =
@@ -1122,13 +1159,13 @@ function ManualFootageSection({
         )
       : null;
 
-  if (panel.manualGroups.length === 0) {
+  if (groups.length === 0 && panel.manualGroups.length === 0) {
     return <p className="text-xs text-purple-400/50">Нет предложений в сценарии</p>;
   }
 
   return (
     <div className="space-y-6">
-      {panel.manualGroups.map((group, groupIndex) => (
+      {groups.map((group, groupIndex) => (
         <div key={`${group.originalText}-${groupIndex}`} className="space-y-2">
           <div className="space-y-1">
             <p className="text-xs font-bold leading-snug text-purple-50">
@@ -2255,6 +2292,7 @@ function HomePage() {
           openFootageIndex: null,
           manualGroups: [],
           aiImageGroups: null,
+          footagePage: 0,
         },
       }));
       void loadManualFootageForVideo(
@@ -2283,6 +2321,7 @@ function HomePage() {
         footageLoading: false,
         manualGroups: [],
         aiImageGroups: buildAIImageGroups(sentences, hook),
+        footagePage: 0,
       },
     }));
   };
@@ -2787,6 +2826,15 @@ function HomePage() {
               </p>
             ) : panel.clipMode === "manual" ? (
               <>
+                {(() => {
+                  const visibleCount =
+                    (panel.footagePage + 1) * GROUPS_PER_PAGE;
+                  const visibleManual = panel.manualGroups.slice(
+                    0,
+                    visibleCount
+                  );
+                  return (
+                    <>
                 {panel.footageLoading &&
                   panel.manualGroups.length === 0 && (
                     <div className="mb-3 flex items-center gap-2 py-2">
@@ -2806,6 +2854,7 @@ function HomePage() {
                 <ManualFootageSection
                   videoId={video.videoId}
                   panel={panel}
+                  groups={visibleManual}
                   slotInputRefs={manualSlotInputRefs}
                   onBlurCommit={(groupIndex, slotIndex, value) =>
                     commitManualSlotQuery(
@@ -2849,10 +2898,35 @@ function HomePage() {
                     )
                   }
                 />
+                <ShowMoreButton
+                  current={visibleManual.length}
+                  total={panel.manualGroups.length}
+                  onMore={() =>
+                    setScripts((prev) => ({
+                      ...prev,
+                      [video.videoId]: {
+                        ...prev[video.videoId],
+                        footagePage: panel.footagePage + 1,
+                      },
+                    }))
+                  }
+                />
+                    </>
+                  );
+                })()}
               </>
             ) : (
               <>
-                {panel.aiImageGroups?.map((group, gi) => (
+                {(() => {
+                  const visibleCount =
+                    (panel.footagePage + 1) * GROUPS_PER_PAGE;
+                  const visibleAI = (panel.aiImageGroups ?? []).slice(
+                    0,
+                    visibleCount
+                  );
+                  return (
+                    <>
+                {visibleAI.map((group, gi) => (
                   <div key={gi} style={{ marginBottom: 32 }}>
                     <p
                       style={{
@@ -3065,6 +3139,22 @@ function HomePage() {
                     </div>
                   </div>
                 ))}
+                <ShowMoreButton
+                  current={visibleAI.length}
+                  total={panel.aiImageGroups?.length ?? 0}
+                  onMore={() =>
+                    setScripts((prev) => ({
+                      ...prev,
+                      [video.videoId]: {
+                        ...prev[video.videoId],
+                        footagePage: panel.footagePage + 1,
+                      },
+                    }))
+                  }
+                />
+                    </>
+                  );
+                })()}
               </>
             )}
           </div>
