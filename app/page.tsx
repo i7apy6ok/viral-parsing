@@ -68,6 +68,7 @@ type AudioSegment = {
 };
 
 type ClipMode = "sentences" | "manual" | null;
+type VoiceMode = "sentences" | "whole";
 
 const MANUAL_SLOTS_PER_SENTENCE = 3;
 type ScriptLanguage = "ru" | "en" | "es";
@@ -107,6 +108,7 @@ type ScriptPanelState = {
   openFootageIndex: number | null;
   footageSearchStarted: boolean;
   footagePage: number;
+  voiceMode: VoiceMode;
 };
 
 const FOOTAGE_DEFAULTS = {
@@ -290,7 +292,6 @@ function getPreservedTranslation(text: string): string | null {
   return translations.length > 0 ? translations[translations.length - 1]! : null;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function formatVoiceScript(
   script: ScriptResult,
   selectedHook: number | null
@@ -1348,6 +1349,7 @@ function HomePage() {
         voiceAudioBlob: null,
         audioDuration: null,
         language: current?.language ?? "ru",
+        ...VOICE_MODE_DEFAULTS,
         ...FOOTAGE_DEFAULTS,
       },
     }));
@@ -1414,6 +1416,7 @@ function HomePage() {
           voiceAudioBlob: null,
           audioDuration: null,
           language: prev[id]?.language ?? "ru",
+          voiceMode: prev[id]?.voiceMode ?? "sentences",
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -1436,6 +1439,7 @@ function HomePage() {
           voiceAudioBlob: null,
           audioDuration: null,
           language: prev[id]?.language ?? "ru",
+          voiceMode: prev[id]?.voiceMode ?? "sentences",
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -2064,6 +2068,7 @@ function HomePage() {
     selectedHook: number | null
   ) => {
     const panel = scripts[videoId];
+    const voiceMode = panel?.voiceMode ?? "sentences";
     if (panel?.voiceAudioUrl) {
       URL.revokeObjectURL(panel.voiceAudioUrl);
     }
@@ -2078,12 +2083,16 @@ function HomePage() {
         voiceAudioBlob: null,
         audioDuration: null,
         language: prev[videoId]?.language ?? "ru",
+        voiceMode,
         ...FOOTAGE_DEFAULTS,
       },
     }));
 
     try {
-      const chunks = getSentenceChunks(script, selectedHook);
+      const chunks =
+        voiceMode === "whole"
+          ? [formatVoiceScript(script, selectedHook)].filter(Boolean)
+          : getSentenceChunks(script, selectedHook);
       if (chunks.length === 0) throw new Error("Нет текста для озвучки");
 
       const synthesizeChunk = async (
@@ -2580,6 +2589,7 @@ function HomePage() {
             voiceAudioBlob: null,
             audioDuration: null,
             language: "ru",
+            ...VOICE_MODE_DEFAULTS,
             ...FOOTAGE_DEFAULTS,
           },
         }));
@@ -2729,6 +2739,25 @@ function HomePage() {
         {panel.copiedAll ? "Скопировано!" : "Скопировать всё"}
       </button>
 
+      <ToggleGroup
+        label="Режим озвучки"
+        value={panel.voiceMode ?? "sentences"}
+        onChange={(mode) => {
+          if (mode !== "sentences" && mode !== "whole") return;
+          setScripts((prev) => ({
+            ...prev,
+            [video.videoId]: {
+              ...prev[video.videoId],
+              voiceMode: mode,
+            },
+          }));
+        }}
+        options={[
+          { value: "sentences", label: "По предложению" },
+          { value: "whole", label: "Целиком" },
+        ]}
+      />
+
       <button
         type="button"
         onClick={() =>
@@ -2754,16 +2783,18 @@ function HomePage() {
               {getVoiceLoadingLabel(panel.voiceProgress)}
             </span>
           </div>
-          <p
-            style={{
-              fontSize: 11,
-              color: "#6b7280",
-              textAlign: "center",
-              marginTop: 4,
-            }}
-          >
-            По одному предложению для естественного звучания
-          </p>
+          {panel.voiceMode === "sentences" && (
+            <p
+              style={{
+                fontSize: 11,
+                color: "#6b7280",
+                textAlign: "center",
+                marginTop: 4,
+              }}
+            >
+              По одному предложению для естественного звучания
+            </p>
+          )}
         </>
       )}
 
@@ -3521,6 +3552,7 @@ function HomePage() {
                             voiceAudioUrl: null,
                             voiceAudioBlob: null,
                             audioDuration: null,
+                            ...VOICE_MODE_DEFAULTS,
                             ...FOOTAGE_DEFAULTS,
                           }),
                           language,
