@@ -395,7 +395,7 @@ async function generateWithOpenRouter(
       },
       body: JSON.stringify({
         model: GEMINI_MODEL,
-        max_tokens: 2500,
+        max_tokens: 16000,
         messages: [
           {
             role: "user",
@@ -478,7 +478,7 @@ async function generateWithOpenRouterFile(
       },
       body: JSON.stringify({
         model: GEMINI_MODEL,
-        max_tokens: 2500,
+        max_tokens: 16000,
         messages: [
           {
             role: "user",
@@ -827,7 +827,12 @@ async function generateScript(
     }
   }
 
-  if (!clientTx && !isUploadedFile && process.env.OPENROUTER_API_KEY) {
+  if (
+    !clientTx &&
+    !isUploadedFile &&
+    process.env.OPENROUTER_API_KEY &&
+    videoType !== "long"
+  ) {
     try {
       const result = await generateWithOpenRouter(
         videoId,
