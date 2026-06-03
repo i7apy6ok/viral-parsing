@@ -302,16 +302,19 @@ function normalizeVideoQueries(queries: unknown): string[] {
 function parseScriptResponse(
   text: string
 ): Omit<ScriptResult, "transcriptUsed" | "provider"> {
+  console.log("[parse] raw text first 100:", text.slice(0, 100));
   // Шаг 1: чистим markdown-обёртку
   let cleaned = text.trim();
   cleaned = cleaned
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim();
+  console.log("[parse] cleaned first 100:", cleaned.slice(0, 100));
 
   // Шаг 2: находим JSON-объект
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
+  console.log("[parse] start:", start, "end:", end);
   if (start !== -1 && end !== -1 && end > start) {
     const jsonStr = cleaned.slice(start, end + 1);
     try {
@@ -741,6 +744,13 @@ async function generateWithGroq(
 
     console.log(`[Groq] OK, response length ${content.length}`);
     return parseScriptResponse(content);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("429")) {
+      throw new Error(
+        "Все провайдеры временно недоступны. Попробуйте через час или выберите другого сценариста."
+      );
+    }
+    throw err;
   } finally {
     clearTimeout(timeoutId);
   }
