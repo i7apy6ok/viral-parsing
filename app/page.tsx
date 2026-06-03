@@ -129,6 +129,10 @@ const FOOTAGE_DEFAULTS = {
   footagePage: 0,
 };
 
+const VOICE_MODE_DEFAULTS = {
+  voiceMode: "sentences" as const,
+};
+
 const GROUPS_PER_PAGE = 10;
 
 function ShowMoreButton({
