@@ -1039,11 +1039,24 @@ export async function POST(request: Request) {
         : undefined
     );
 
-    return NextResponse.json({
+    const responseBody = {
       ...result,
       transcriptUsed: provider.startsWith("gemini"),
       provider,
-    });
+    };
+    console.log(
+      "[generate-script] Response size:",
+      JSON.stringify(responseBody).length
+    );
+    try {
+      return NextResponse.json(responseBody);
+    } catch (e) {
+      console.error("[generate-script] Failed to serialize response:", e);
+      return NextResponse.json(
+        { error: "Ошибка формирования ответа" },
+        { status: 500 }
+      );
+    }
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Internal server error";
