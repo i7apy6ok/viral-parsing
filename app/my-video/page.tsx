@@ -45,6 +45,7 @@ function MyVideoPage() {
   const [script, setScript] = useState<ScriptResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [needsUpload, setNeedsUpload] = useState(false);
+  const [needsTranscript, setNeedsTranscript] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [copiedHook, setCopiedHook] = useState<number | null>(null);
@@ -73,6 +74,7 @@ function MyVideoPage() {
     setError(null);
     setScript(null);
     setNeedsUpload(false);
+    setNeedsTranscript(false);
 
     try {
       let body: Record<string, unknown>;
@@ -151,6 +153,13 @@ function MyVideoPage() {
         !videoFile
       ) {
         setNeedsUpload(true);
+      }
+
+      if (
+        data.provider?.includes("groq") ||
+        data.provider?.includes("fallback")
+      ) {
+        setNeedsTranscript(true);
       }
 
       setScript(data);
@@ -406,7 +415,7 @@ function MyVideoPage() {
           </p>
         )}
 
-        {needsUpload && script && (
+        {(needsUpload || needsTranscript) && script && (
           <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-900/10 px-4 py-4">
             <p className="mb-3 text-sm text-amber-300">
               ⚠️ Gemini не смогла просмотреть видео напрямую. Сценарий создан по
