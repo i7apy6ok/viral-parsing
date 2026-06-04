@@ -430,6 +430,16 @@ async def merge_video(
             detail="clip_urls, start_times, and durations must have the same length",
         )
 
+    # Пропускаем слоты с duration = 0
+    clips = list(zip(clip_urls, start_times, durations))
+    clips = [(url, start, dur) for url, start, dur in clips if dur > 0]
+    if not clips:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one clip with duration > 0 is required",
+        )
+    clip_urls, start_times, durations = (list(x) for x in zip(*clips))
+
     RENDI_API_KEY = os.environ.get("RENDI_API_KEY", "").strip()
     logging.warning(
         f"RENDI_API_KEY loaded: {'YES' if RENDI_API_KEY else 'NO - KEY IS MISSING'}"

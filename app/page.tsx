@@ -314,10 +314,18 @@ function getSentenceChunks(
       ? script.sentences.map(stripTranslation).filter(Boolean)
       : [stripTranslation(script.body)].filter(Boolean);
 
-  const ctaClean = stripTranslation(script.cta);
   const hookSentences = splitHookIntoSentences(hook);
 
-  return [...hookSentences, ...bodyChunks, ctaClean].filter(Boolean);
+  const ctaSentences = stripTranslation(script.cta)
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const ctaChunks =
+    ctaSentences.length > 0
+      ? ctaSentences
+      : [stripTranslation(script.cta)].filter(Boolean);
+
+  return [...hookSentences, ...bodyChunks, ...ctaChunks].filter(Boolean);
 }
 
 function resolveAudioChunkIndex(
@@ -644,33 +652,6 @@ function getSelectedFootageClips(groups: FootageGroup[]): SearchVideoResult[] {
     );
 }
 
-function buildCtaManualGroup(
-  script: ScriptResult,
-  language: ScriptLanguage
-): ManualGroup | null {
-  const rawCta = script.cta?.trim() ?? "";
-  if (!rawCta) {
-    return null;
-  }
-
-  const { originalText: ctaQuery, translation: ctaTranslation } =
-    parseTranslation(rawCta);
-  const initialQuery = (
-    script.videoQueries[script.videoQueries.length - 1] ??
-    script.videoQueries[0] ??
-    ctaQuery
-  ).trim();
-
-  return {
-    originalText: ctaQuery,
-    translation: language !== "ru" && ctaTranslation ? ctaTranslation : "",
-    slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
-      createManualSlot(initialQuery)
-    ),
-    slotDurations: null,
-  };
-}
-
 function splitWithVariance(total: number): [number, number, number] {
   const base = total / 3;
   const v = base * 0.2;
@@ -762,7 +743,7 @@ function buildManualGroups(
 
   const hookIndex = getSelectedHookIndex(selectedHook);
   const rawHook = (script.hooks[hookIndex] ?? script.hooks[0] ?? "").trim();
-  const ctaGroup = buildCtaManualGroup(script, language);
+  const rawCta = script.cta?.trim() ?? "";
   const hookTrailingTranslation =
     language !== "ru" ? parseRussianTranslation(rawHook) : null;
   const hookInitialQuery = (
@@ -797,8 +778,33 @@ function buildManualGroups(
     groups = [...hookGroups, ...groups];
   }
 
-  if (ctaGroup) {
-    groups = [...groups, ctaGroup];
+  if (rawCta) {
+    const ctaTrailingTranslation =
+      language !== "ru" ? parseRussianTranslation(rawCta) : null;
+    const ctaInitialQuery = (
+      script.videoQueries[script.videoQueries.length - 1] ??
+      script.videoQueries[0] ??
+      toPexelsSearchQuery(rawCta)
+    ).trim();
+    const ctaSentences = splitHookIntoSentences(rawCta);
+    const ctaGroups: ManualGroup[] = ctaSentences.map((sentenceText, index) => {
+      const { main, translation } = splitTextWithTranslation(sentenceText);
+      const isLastCta = index === ctaSentences.length - 1;
+      const groupTranslation =
+        translation ||
+        (isLastCta && ctaTrailingTranslation ? ctaTrailingTranslation : null);
+
+      return {
+        originalText: main,
+        translation:
+          language !== "ru" && groupTranslation ? groupTranslation : "",
+        slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
+          createManualSlot(ctaInitialQuery || main)
+        ),
+        slotDurations: null,
+      };
+    });
+    groups = [...groups, ...ctaGroups];
   }
 
   return groups;

@@ -305,8 +305,10 @@ function parseScriptResponse(
   // Шаг 1: чистим markdown-обёртку
   let cleaned = text.trim();
   cleaned = cleaned
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/i, "")
+    .replace(/^```(?:json)?\s*/im, "")
+    .replace(/\s*```\s*$/im, "")
+    .replace(/^\s*["'`]+/, "")
+    .replace(/["'`]+\s*$/, "")
     .trim();
   console.log("[parse] cleaned first 100:", cleaned.slice(0, 100));
 
