@@ -98,13 +98,14 @@ async function animateWithWan(imageUrl: string, prompt: string): Promise<string>
       const out = data.output;
 
       const url =
+        out?.result ??
+        out?.url ??
+        out?.video_url ??
+        out?.mp4 ??
         data.result ??
         (typeof out === "string" ? out : null) ??
         (Array.isArray(out)
-          ? (out[0]?.video_url ?? out[0]?.url ?? out[0])
-          : null) ??
-        (out && typeof out === "object"
-          ? (out.video_url ?? out.url ?? out.mp4 ?? out.video)
+          ? (out[0]?.result ?? out[0]?.url ?? out[0])
           : null) ??
         null;
 
