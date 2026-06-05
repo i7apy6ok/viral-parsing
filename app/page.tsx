@@ -3288,23 +3288,22 @@ function HomePage() {
                 onClick={() => void handleDownloadVideo(video.videoId)}
                 disabled={
                   panel.mergeLoading ||
-                  (panel.clipMode === "manual"
-                    ? !hasManualMergeClips(
-                        panel.manualGroups,
-                        panel.audioDuration != null
-                          ? getManualSlotCalculatedDurations(
-                              panel.manualGroups,
-                              panel.audioDuration,
-                              panel.language ?? "ru"
-                            )
-                          : panel.manualGroups.map((group) =>
-                              group.slots.map(() => 0)
-                            )
-                      )
-                    : panel.footageLoading ||
-                      getSelectedFootageClips(
-                        panel.footageGroups
-                      ).length === 0)
+                  (panel.clipMode === "sentences"
+                    ? !aiImagesReady
+                    : panel.clipMode === "manual"
+                      ? !hasManualMergeClips(
+                          panel.manualGroups,
+                          panel.audioDuration != null
+                            ? getManualSlotCalculatedDurations(
+                                panel.manualGroups,
+                                panel.audioDuration,
+                                panel.language ?? "ru"
+                              )
+                            : panel.manualGroups.map((group) =>
+                                group.slots.map(() => 0)
+                              )
+                        )
+                      : true)
                 }
                 className="mt-4 w-full rounded-md bg-gradient-to-r from-violet-600 to-purple-600 py-2 text-sm font-medium text-white transition-colors hover:from-violet-500 hover:to-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
