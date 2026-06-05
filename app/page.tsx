@@ -2955,7 +2955,18 @@ function HomePage() {
                     }}
                   />
                 </div>
-                {visibleAI.map((group, gi) => (
+                {visibleAI.map((group, gi) => {
+                  const totalChars = (panel.aiImageGroups ?? []).reduce(
+                    (sum, g) => sum + (g.originalText?.length ?? 0),
+                    0
+                  );
+                  const groupChars = group.originalText?.length ?? 0;
+                  const calculatedDuration =
+                    panel.audioDuration != null && totalChars > 0
+                      ? (groupChars / totalChars) * panel.audioDuration
+                      : null;
+
+                  return (
                   <div key={gi} style={{ marginBottom: 32 }}>
                     <p
                       style={{
@@ -3182,7 +3193,8 @@ function HomePage() {
                       ))}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 <ShowMoreButton
                   current={visibleAI.length}
                   total={panel.aiImageGroups?.length ?? 0}
