@@ -2004,13 +2004,19 @@ function HomePage() {
       }
 
       const preservedTranslation = getPreservedTranslation(panel.data.body);
+      const body = combineWithTranslation(main, preservedTranslation);
+      const newSentences = main
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
       return {
         ...prev,
         [videoId]: {
           ...panel,
           data: {
             ...panel.data,
-            body: combineWithTranslation(main, preservedTranslation),
+            body,
+            sentences: newSentences,
           },
         },
       };
@@ -2659,6 +2665,10 @@ function HomePage() {
 
   const renderScriptPanel = (video: ViralVideoResult) => {
     const panel = scripts[video.videoId];
+    const aiImagesReady =
+      panel?.aiImageGroups?.some((g) =>
+        g.slots.some((s) => s.animatedVideoUrl || s.imageUrl)
+      ) ?? false;
 
     return (
       <div className="rounded-lg border border-purple-900/50 bg-[#0f0a1e]/80 p-4">
