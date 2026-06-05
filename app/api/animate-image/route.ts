@@ -4,6 +4,38 @@ export const maxDuration = 120;
 
 type AnimateModel = "kling" | "wan26";
 
+async function enhancePromptForVideo(rawPrompt: string): Promise<string> {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "anthropic/claude-haiku-4-5",
+        max_tokens: 150,
+        messages: [
+          {
+            role: "user",
+            content: `You are an expert at writing image-to-video animation prompts.
+Convert this text into a motion prompt in English (max 50 words).
+Focus on: camera movement, motion type, speed, atmosphere. Stay faithful to the scene, NO fantasy elements, NO wings, NO magical effects unless text implies them.
+Return ONLY the prompt, nothing else.
+
+Text: "${rawPrompt}"`,
+          },
+        ],
+      }),
+    });
+    if (!res.ok) return rawPrompt;
+    const data = await res.json();
+    return (data?.choices?.[0]?.message?.content?.trim() as string) || rawPrompt;
+  } catch {
+    return rawPrompt;
+  }
+}
+
 async function animateWithKling(imageUrl: string, prompt: string): Promise<string> {
   const res = await fetch(
     "https://fal.run/fal-ai/kling-video/v2.1/standard/image-to-video",
@@ -15,7 +47,7 @@ async function animateWithKling(imageUrl: string, prompt: string): Promise<strin
       },
       body: JSON.stringify({
         image_url: imageUrl,
-        prompt: prompt || "cinematic motion, smooth camera movement",
+        prompt,
         duration: "5",
         aspect_ratio: "16:9",
       }),
@@ -39,7 +71,7 @@ async function animateWithWan(imageUrl: string, prompt: string): Promise<string>
     },
     body: JSON.stringify({
       input: {
-        prompt: prompt || "cinematic motion, smooth camera movement",
+        prompt,
         image: imageUrl,
         negative_prompt: "",
         size: "720p",
@@ -84,11 +116,15 @@ export async function POST(req: NextRequest) {
     model?: AnimateModel;
   };
   if (!imageUrl) return NextResponse.json({ error: "No imageUrl" }, { status: 400 });
+
+  const enhancedPrompt = await enhancePromptForVideo(prompt ?? "");
+  const animateModel: AnimateModel = model === "wan26" ? "wan26" : "kling";
+
   try {
     const videoUrl =
-      model === "wan26"
-        ? await animateWithWan(imageUrl, prompt ?? "")
-        : await animateWithKling(imageUrl, prompt ?? "");
+      animateModel === "wan26"
+        ? await animateWithWan(imageUrl, enhancedPrompt)
+        : await animateWithKling(imageUrl, enhancedPrompt);
     return NextResponse.json({ videoUrl });
   } catch (err) {
     return NextResponse.json(

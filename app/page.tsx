@@ -3177,12 +3177,13 @@ function HomePage() {
                                     alignItems: "center",
                                     gap: 6,
                                     marginBottom: 4,
+                                    flexWrap: "wrap",
                                   }}
                                 >
                                   <span
                                     style={{ fontSize: 11, color: "#9ca3af" }}
                                   >
-                                    Модель по умолчанию:
+                                    Модель анимации:
                                   </span>
                                   {(["kling", "wan26"] as const).map((m) => (
                                     <button
@@ -3195,7 +3196,7 @@ function HomePage() {
                                       }
                                       style={{
                                         fontSize: 11,
-                                        padding: "2px 8px",
+                                        padding: "2px 10px",
                                         borderRadius: 4,
                                         border: "1px solid",
                                         borderColor:
@@ -3221,8 +3222,7 @@ function HomePage() {
                                   ))}
                                 </div>
                               )}
-
-                              <div style={{ display: "flex", gap: 4 }}>
+                              <div style={{ display: "flex", gap: 0 }}>
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -3247,11 +3247,12 @@ function HomePage() {
                                       : "#7c3aed",
                                     color: "#fff",
                                     opacity: slot.animating ? 0.6 : 1,
+                                    whiteSpace: "nowrap",
                                   }}
                                 >
                                   {slot.animating
                                     ? "⏳ Оживляем..."
-                                    : `🎬 Оживить (${(slot.animateModel ?? panel.defaultAnimateModel ?? "kling") === "kling" ? "Kling 2.1" : "Wan 2.6"})`}
+                                    : `🎬 ${(slot.animateModel ?? panel.defaultAnimateModel ?? "kling") === "kling" ? "Kling 2.1" : "Wan 2.6"}`}
                                 </button>
                                 <select
                                   value={
@@ -3273,7 +3274,7 @@ function HomePage() {
                                     borderRadius: "0 4px 4px 0",
                                     border: "1px solid #6d28d9",
                                     borderLeft: "none",
-                                    background: "#1f1035",
+                                    background: "#2d1b69",
                                     color: "#c4b5fd",
                                     cursor: "pointer",
                                   }}
