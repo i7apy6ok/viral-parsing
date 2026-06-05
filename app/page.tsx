@@ -661,15 +661,6 @@ function segmentTextForDuration(
   return toPexelsSearchQuery(originalQuery);
 }
 
-function getSelectedFootageClips(groups: FootageGroup[]): SearchVideoResult[] {
-  return groups
-    .filter((group) => !group.loading && group.videos.length > 0)
-    .map(
-      (group) =>
-        group.videos[group.selectedIndex % group.videos.length]
-    );
-}
-
 function splitWithVariance(total: number): [number, number, number] {
   const base = total / 3;
   const v = base * 0.2;
@@ -907,84 +898,6 @@ function hasManualMergeClips(
   calculated: number[][]
 ): boolean {
   return collectManualMergePayload(groups, calculated).clips.length > 0;
-}
-
-function normalizeSegmentDurations(
-  durations: number[],
-  totalAudioDuration: number
-): number[] {
-  if (durations.length === 0) {
-    return [];
-  }
-
-  const sum = durations.reduce((total, duration) => total + duration, 0);
-  if (sum <= 0) {
-    return durations;
-  }
-
-  const scale = totalAudioDuration / sum;
-  const normalized = durations.map(
-    (duration) => Math.round(duration * scale * 10) / 10
-  );
-
-  const normalizedSum = normalized.reduce(
-    (total, duration) => total + duration,
-    0
-  );
-  const drift = Math.round((totalAudioDuration - normalizedSum) * 10) / 10;
-  if (normalized.length > 0 && drift !== 0) {
-    const lastIndex = normalized.length - 1;
-    normalized[lastIndex] =
-      Math.round((normalized[lastIndex] + drift) * 10) / 10;
-  }
-
-  return normalized;
-}
-
-function estimateSegmentDurations(
-  texts: string[],
-  totalAudioDuration: number,
-  audioSegments: AudioSegment[] | null = null
-): number[] {
-  if (texts.length === 0) {
-    return [];
-  }
-
-  let durations: number[];
-
-  if (audioSegments && audioSegments.length > 0) {
-    const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
-    const totalChars = charCounts.reduce((a, b) => a + b, 0);
-
-    durations = texts.map((_, index) => {
-      const segment = audioSegments[index];
-      if (segment) {
-        return Math.round((segment.end - segment.start) * 10) / 10;
-      }
-
-      if (totalChars === 0) {
-        return 0;
-      }
-
-      return (
-        Math.round(
-          (charCounts[index] / totalChars) * totalAudioDuration * 10
-        ) / 10
-      );
-    });
-  } else {
-    const charCounts = texts.map((t) => t.replace(/\s+/g, "").length);
-    const totalChars = charCounts.reduce((a, b) => a + b, 0);
-    if (totalChars === 0) {
-      return texts.map(() => 0);
-    }
-
-    durations = charCounts.map(
-      (c) => Math.round((c / totalChars) * totalAudioDuration * 10) / 10
-    );
-  }
-
-  return normalizeSegmentDurations(durations, totalAudioDuration);
 }
 
 function ManualSlotDurationInput({
