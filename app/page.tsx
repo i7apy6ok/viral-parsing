@@ -2483,21 +2483,6 @@ function HomePage() {
 
       clipUrls = aiClips.map((clip) => clip.url);
       durations = aiClips.map((clip) => clip.duration);
-    } else {
-      const selectedClips = getSelectedFootageClips(panel.footageGroups);
-      if (selectedClips.length === 0) {
-        setScripts((prev) => ({
-          ...prev,
-          [videoId]: {
-            ...prev[videoId],
-            mergeError: "Нет выбранных видеоклипов",
-            mergeStatus: null,
-          },
-        }));
-        return;
-      }
-      clipUrls = selectedClips.map((clip) => clip.url);
-      durations = [];
     }
 
     setScripts((prev) => ({
@@ -2535,21 +2520,7 @@ function HomePage() {
         await audioContext.close();
       }
 
-      if (!isManual) {
-        const footageTexts = panel.footageGroups
-          .filter((group) => !group.loading && group.videos.length > 0)
-          .map((group) =>
-            segmentTextForDuration(group.originalQuery, panel.language ?? "ru")
-          );
-        durations = estimateSegmentDurations(
-          footageTexts,
-          audioDuration,
-          panel.audioSegments
-        );
-      }
-
-      const clipUrls = selectedClips.map((clip) => clip.url);
-      const startTimes = selectedClips.map(() => 0);
+      const startTimes = clipUrls.map(() => 0);
 
       const formData = new FormData();
       formData.append("audio", audioBlob, "audio.wav");
@@ -3222,8 +3193,7 @@ function HomePage() {
                             <ManualSlotDurationInput
                               calculatedDuration={
                                 panel.audioDuration /
-                                (panel.aiImageGroups?.flatMap((g) => g.slots)
-                                  .length || 1)
+                                (panel.aiImageGroups?.length || 1)
                               }
                               customDuration={slot.customDuration}
                               onChange={(val) =>
