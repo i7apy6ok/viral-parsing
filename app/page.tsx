@@ -316,14 +316,20 @@ function getSentenceChunks(
 
   const hookSentences = splitHookIntoSentences(hook);
 
-  const ctaSentences = stripTranslation(script.cta)
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const ctaChunks =
-    ctaSentences.length > 0
-      ? ctaSentences
-      : [stripTranslation(script.cta)].filter(Boolean);
+  const ctaClean = stripTranslation(script.cta).trim();
+  const lastBodyChunk = bodyChunks[bodyChunks.length - 1]?.trim() ?? "";
+  const ctaIsDuplicate =
+    ctaClean && lastBodyChunk.includes(ctaClean.slice(0, 30));
+
+  let ctaChunks: string[] = [];
+  if (!ctaIsDuplicate) {
+    const ctaSentences = ctaClean
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    ctaChunks =
+      ctaSentences.length > 0 ? ctaSentences : ctaClean ? [ctaClean] : [];
+  }
 
   return [...hookSentences, ...bodyChunks, ...ctaChunks].filter(Boolean);
 }
@@ -779,32 +785,44 @@ function buildManualGroups(
   }
 
   if (rawCta) {
-    const ctaTrailingTranslation =
-      language !== "ru" ? parseRussianTranslation(rawCta) : null;
-    const ctaInitialQuery = (
-      script.videoQueries[script.videoQueries.length - 1] ??
-      script.videoQueries[0] ??
-      toPexelsSearchQuery(rawCta)
-    ).trim();
-    const ctaSentences = splitHookIntoSentences(rawCta);
-    const ctaGroups: ManualGroup[] = ctaSentences.map((sentenceText, index) => {
-      const { main, translation } = splitTextWithTranslation(sentenceText);
-      const isLastCta = index === ctaSentences.length - 1;
-      const groupTranslation =
-        translation ||
-        (isLastCta && ctaTrailingTranslation ? ctaTrailingTranslation : null);
+    const ctaText = stripTranslation(script.cta).trim().slice(0, 50);
+    const lastGroup = groups[groups.length - 1];
+    const lastGroupText = lastGroup?.originalText?.trim().slice(0, 50) ?? "";
+    const ctaAlreadyInSentences =
+      ctaText &&
+      lastGroupText &&
+      lastGroupText.includes(ctaText.slice(0, 30));
 
-      return {
-        originalText: main,
-        translation:
-          language !== "ru" && groupTranslation ? groupTranslation : "",
-        slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
-          createManualSlot(ctaInitialQuery || main)
-        ),
-        slotDurations: null,
-      };
-    });
-    groups = [...groups, ...ctaGroups];
+    if (!ctaAlreadyInSentences) {
+      const ctaTrailingTranslation =
+        language !== "ru" ? parseRussianTranslation(rawCta) : null;
+      const ctaInitialQuery = (
+        script.videoQueries[script.videoQueries.length - 1] ??
+        script.videoQueries[0] ??
+        toPexelsSearchQuery(rawCta)
+      ).trim();
+      const ctaSentences = splitHookIntoSentences(rawCta);
+      const ctaGroups: ManualGroup[] = ctaSentences.map(
+        (sentenceText, index) => {
+          const { main, translation } = splitTextWithTranslation(sentenceText);
+          const isLastCta = index === ctaSentences.length - 1;
+          const groupTranslation =
+            translation ||
+            (isLastCta && ctaTrailingTranslation ? ctaTrailingTranslation : null);
+
+          return {
+            originalText: main,
+            translation:
+              language !== "ru" && groupTranslation ? groupTranslation : "",
+            slots: Array.from({ length: MANUAL_SLOTS_PER_SENTENCE }, () =>
+              createManualSlot(ctaInitialQuery || main)
+            ),
+            slotDurations: null,
+          };
+        }
+      );
+      groups = [...groups, ...ctaGroups];
+    }
   }
 
   return groups;
