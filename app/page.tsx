@@ -3113,12 +3113,11 @@ function HomePage() {
                             </p>
                           )}
 
-                          {panel.audioDuration != null && panel.data && (
+                          {panel.audioDuration != null &&
+                            panel.data &&
+                            calculatedDuration != null && (
                             <ManualSlotDurationInput
-                              calculatedDuration={
-                                panel.audioDuration /
-                                (panel.aiImageGroups?.length || 1)
-                              }
+                              calculatedDuration={calculatedDuration}
                               customDuration={slot.customDuration}
                               onChange={(val) =>
                                 updateAISlot(video.videoId, gi, si, {
