@@ -53,6 +53,7 @@ type AIImageSlot = {
   animatedVideoUrl: string | null;
   animateError: string | null;
   customPrompt: string | null;
+  customDuration: number | null;
 };
 
 type AIImageGroup = {
@@ -107,6 +108,7 @@ type ScriptPanelState = {
   openFootageIndex: number | null;
   footageSearchStarted: boolean;
   footagePage: number;
+  aiImageStyle: string;
 };
 
 const FOOTAGE_DEFAULTS = {
@@ -517,6 +519,7 @@ const EMPTY_AI_IMAGE_SLOT = (): AIImageSlot => ({
   animatedVideoUrl: null,
   animateError: null,
   customPrompt: null,
+  customDuration: null,
 });
 
 function buildAIImageGroups(
@@ -1391,6 +1394,7 @@ function HomePage() {
         voiceAudioBlob: null,
         audioDuration: null,
         language: current?.language ?? "ru",
+        aiImageStyle: current?.aiImageStyle ?? "",
         ...FOOTAGE_DEFAULTS,
       },
     }));
@@ -1457,6 +1461,7 @@ function HomePage() {
           voiceAudioBlob: null,
           audioDuration: null,
           language: prev[id]?.language ?? "ru",
+          aiImageStyle: prev[id]?.aiImageStyle ?? "",
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -1479,6 +1484,7 @@ function HomePage() {
           voiceAudioBlob: null,
           audioDuration: null,
           language: prev[id]?.language ?? "ru",
+          aiImageStyle: prev[id]?.aiImageStyle ?? "",
           ...FOOTAGE_DEFAULTS,
         },
       }));
@@ -1595,6 +1601,17 @@ function HomePage() {
     }));
   };
 
+  const updatePanel = (videoId: string, patch: Partial<ScriptPanelState>) => {
+    setScripts((prev) => {
+      const panel = prev[videoId];
+      if (!panel) return prev;
+      return {
+        ...prev,
+        [videoId]: { ...panel, ...patch },
+      };
+    });
+  };
+
   const updateAISlot = (
     videoId: string,
     groupIdx: number,
@@ -1627,7 +1644,10 @@ function HomePage() {
     if (!panel?.aiImageGroups) return;
     const group = panel.aiImageGroups[groupIdx];
     const slot = group.slots[slotIdx];
-    const prompt = slot.customPrompt?.trim() || group.originalText;
+    const style = panel.aiImageStyle?.trim();
+    const prompt =
+      (slot.customPrompt?.trim() || group.originalText) +
+      (style ? `, ${style}` : "");
 
     updateAISlot(videoId, groupIdx, slotIdx, { loading: true, error: null });
 
@@ -2623,6 +2643,7 @@ function HomePage() {
             voiceAudioBlob: null,
             audioDuration: null,
             language: "ru",
+            aiImageStyle: "",
             ...FOOTAGE_DEFAULTS,
           },
         }));
@@ -2969,6 +2990,38 @@ function HomePage() {
                   );
                   return (
                     <>
+                <div style={{ marginBottom: 16 }}>
+                  <label
+                    style={{
+                      fontSize: 12,
+                      color: "#9ca3af",
+                      display: "block",
+                      marginBottom: 4,
+                    }}
+                  >
+                    🎨 Стиль всех картинок (необязательно)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Например: cinematic, dark fantasy, anime, realistic photo..."
+                    value={panel.aiImageStyle ?? ""}
+                    onChange={(e) =>
+                      updatePanel(video.videoId, {
+                        aiImageStyle: e.target.value,
+                      })
+                    }
+                    style={{
+                      width: "100%",
+                      background: "#1f2937",
+                      border: "1px solid #374151",
+                      borderRadius: 6,
+                      padding: "6px 10px",
+                      color: "#f9fafb",
+                      fontSize: 12,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
                 {visibleAI.map((group, gi) => (
                   <div key={gi} style={{ marginBottom: 32 }}>
                     <p
@@ -3114,6 +3167,22 @@ function HomePage() {
                             >
                               {slot.animateError}
                             </p>
+                          )}
+
+                          {panel.audioDuration != null && panel.data && (
+                            <ManualSlotDurationInput
+                              calculatedDuration={
+                                panel.audioDuration /
+                                (panel.aiImageGroups?.flatMap((g) => g.slots)
+                                  .length || 1)
+                              }
+                              customDuration={slot.customDuration}
+                              onChange={(val) =>
+                                updateAISlot(video.videoId, gi, si, {
+                                  customDuration: val,
+                                })
+                              }
+                            />
                           )}
 
                           <button
@@ -3564,6 +3633,7 @@ function HomePage() {
                             voiceAudioUrl: null,
                             voiceAudioBlob: null,
                             audioDuration: null,
+                            aiImageStyle: "",
                             ...FOOTAGE_DEFAULTS,
                           }),
                           language,
