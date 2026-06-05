@@ -96,10 +96,38 @@ async function animateWithWan(imageUrl: string, prompt: string): Promise<string>
     const data = await statusRes.json();
     if (data.status === "COMPLETED") {
       const out = data.output;
-      const url = Array.isArray(out)
-        ? (out[0]?.video_url ?? out[0]?.url)
-        : (out?.video_url ?? out?.url);
-      if (!url) throw new Error("Wan 2.6 не вернул URL видео");
+      console.log("RunPod COMPLETED output:", JSON.stringify(out));
+
+      let url: string | null = null;
+
+      if (typeof out === "string") {
+        url = out;
+      } else if (Array.isArray(out)) {
+        url =
+          out[0]?.video_url ??
+          out[0]?.url ??
+          out[0]?.mp4 ??
+          out[0] ??
+          null;
+      } else if (out && typeof out === "object") {
+        url =
+          out.video_url ??
+          out.url ??
+          out.mp4 ??
+          out.video ??
+          out.output ??
+          null;
+      }
+
+      if (!url) {
+        console.error(
+          "Wan 2.6 unexpected output structure:",
+          JSON.stringify(data)
+        );
+        throw new Error(
+          `Wan 2.6 неизвестная структура ответа: ${JSON.stringify(out)}`
+        );
+      }
       return url as string;
     }
     if (data.status === "FAILED" || data.status === "CANCELLED") {
