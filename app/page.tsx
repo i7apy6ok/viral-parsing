@@ -2402,6 +2402,8 @@ function HomePage() {
     }
 
     const isManual = panel.clipMode === "manual";
+    const isSentences =
+      panel.clipMode === "sentences" && panel.aiImageGroups != null;
     const manualCalculated =
       isManual && panel.audioDuration != null
         ? getManualSlotCalculatedDurations(
@@ -2411,8 +2413,8 @@ function HomePage() {
           )
         : null;
 
-    let selectedClips: SearchVideoResult[];
-    let durations: number[];
+    let clipUrls: string[] = [];
+    let durations: number[] = [];
 
     if (isManual) {
       const groupsWithDurations = applyManualSlotDurations(
@@ -2443,10 +2445,46 @@ function HomePage() {
         return;
       }
 
-      selectedClips = payload.clips;
+      clipUrls = payload.clips.map((clip) => clip.url);
       durations = payload.durations;
+    } else if (isSentences) {
+      const aiClips: { url: string; duration: number }[] = [];
+      const totalSlots = panel.aiImageGroups!.reduce(
+        (sum, g) =>
+          sum + g.slots.filter((s) => s.animatedVideoUrl || s.imageUrl).length,
+        0
+      );
+      const defaultDuration = panel.audioDuration
+        ? panel.audioDuration / Math.max(totalSlots, 1)
+        : 3;
+
+      for (const group of panel.aiImageGroups!) {
+        for (const slot of group.slots) {
+          const url = slot.animatedVideoUrl || slot.imageUrl;
+          if (!url) continue;
+          const duration = slot.customDuration ?? defaultDuration;
+          if (duration > 0) {
+            aiClips.push({ url, duration });
+          }
+        }
+      }
+
+      if (aiClips.length === 0) {
+        setScripts((prev) => ({
+          ...prev,
+          [videoId]: {
+            ...prev[videoId],
+            mergeError: "Нет сгенерированных картинок",
+            mergeStatus: null,
+          },
+        }));
+        return;
+      }
+
+      clipUrls = aiClips.map((clip) => clip.url);
+      durations = aiClips.map((clip) => clip.duration);
     } else {
-      selectedClips = getSelectedFootageClips(panel.footageGroups);
+      const selectedClips = getSelectedFootageClips(panel.footageGroups);
       if (selectedClips.length === 0) {
         setScripts((prev) => ({
           ...prev,
@@ -2458,6 +2496,7 @@ function HomePage() {
         }));
         return;
       }
+      clipUrls = selectedClips.map((clip) => clip.url);
       durations = [];
     }
 
