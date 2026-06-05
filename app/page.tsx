@@ -54,6 +54,7 @@ type AIImageSlot = {
   animateError: string | null;
   customPrompt: string | null;
   customDuration: number | null;
+  animateModel: "kling" | "wan26";
 };
 
 type AIImageGroup = {
@@ -109,6 +110,7 @@ type ScriptPanelState = {
   footageSearchStarted: boolean;
   footagePage: number;
   aiImageStyle: string;
+  defaultAnimateModel: "kling" | "wan26";
 };
 
 const FOOTAGE_DEFAULTS = {
@@ -127,6 +129,7 @@ const FOOTAGE_DEFAULTS = {
   audioChunks: null,
   footageSearchStarted: false,
   footagePage: 0,
+  defaultAnimateModel: "kling" as "kling" | "wan26",
 };
 
 const GROUPS_PER_PAGE = 10;
@@ -520,6 +523,7 @@ const EMPTY_AI_IMAGE_SLOT = (): AIImageSlot => ({
   animateError: null,
   customPrompt: null,
   customDuration: null,
+  animateModel: "kling" as "kling" | "wan26",
 });
 
 function buildAIImageGroups(
@@ -1610,6 +1614,7 @@ function HomePage() {
         body: JSON.stringify({
           imageUrl: slot.imageUrl,
           prompt: slot.customPrompt?.trim() || group.originalText,
+          model: slot.animateModel ?? panel.defaultAnimateModel ?? "kling",
         }),
       });
       const data = (await res.json()) as {
@@ -3158,35 +3163,126 @@ function HomePage() {
                           </button>
 
                           {slot.imageUrl && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void handleAnimateAIImage(
-                                  video.videoId,
-                                  gi,
-                                  si
-                                )
-                              }
-                              disabled={slot.animating}
+                            <div
                               style={{
-                                fontSize: 12,
-                                padding: "4px 8px",
-                                borderRadius: 4,
-                                border: "none",
-                                cursor: slot.animating
-                                  ? "not-allowed"
-                                  : "pointer",
-                                background: slot.animating
-                                  ? "#374151"
-                                  : "#7c3aed",
-                                color: "#fff",
-                                opacity: slot.animating ? 0.6 : 1,
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 4,
                               }}
                             >
-                              {slot.animating
-                                ? "⏳ Оживляем..."
-                                : "🎬 Оживить"}
-                            </button>
+                              {gi === 0 && si === 0 && (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  <span
+                                    style={{ fontSize: 11, color: "#9ca3af" }}
+                                  >
+                                    Модель по умолчанию:
+                                  </span>
+                                  {(["kling", "wan26"] as const).map((m) => (
+                                    <button
+                                      key={m}
+                                      type="button"
+                                      onClick={() =>
+                                        updatePanel(video.videoId, {
+                                          defaultAnimateModel: m,
+                                        })
+                                      }
+                                      style={{
+                                        fontSize: 11,
+                                        padding: "2px 8px",
+                                        borderRadius: 4,
+                                        border: "1px solid",
+                                        borderColor:
+                                          (panel.defaultAnimateModel ??
+                                            "kling") === m
+                                            ? "#7c3aed"
+                                            : "#4b5563",
+                                        background:
+                                          (panel.defaultAnimateModel ??
+                                            "kling") === m
+                                            ? "#4c1d95"
+                                            : "transparent",
+                                        color:
+                                          (panel.defaultAnimateModel ??
+                                            "kling") === m
+                                            ? "#e9d5ff"
+                                            : "#9ca3af",
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      {m === "kling" ? "Kling 2.1" : "Wan 2.6"}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div style={{ display: "flex", gap: 4 }}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleAnimateAIImage(
+                                      video.videoId,
+                                      gi,
+                                      si
+                                    )
+                                  }
+                                  disabled={slot.animating}
+                                  style={{
+                                    flex: 1,
+                                    fontSize: 12,
+                                    padding: "4px 8px",
+                                    borderRadius: "4px 0 0 4px",
+                                    border: "none",
+                                    cursor: slot.animating
+                                      ? "not-allowed"
+                                      : "pointer",
+                                    background: slot.animating
+                                      ? "#374151"
+                                      : "#7c3aed",
+                                    color: "#fff",
+                                    opacity: slot.animating ? 0.6 : 1,
+                                  }}
+                                >
+                                  {slot.animating
+                                    ? "⏳ Оживляем..."
+                                    : `🎬 Оживить (${(slot.animateModel ?? panel.defaultAnimateModel ?? "kling") === "kling" ? "Kling 2.1" : "Wan 2.6"})`}
+                                </button>
+                                <select
+                                  value={
+                                    slot.animateModel ??
+                                    panel.defaultAnimateModel ??
+                                    "kling"
+                                  }
+                                  onChange={(e) =>
+                                    updateAISlot(video.videoId, gi, si, {
+                                      animateModel: e.target.value as
+                                        | "kling"
+                                        | "wan26",
+                                    })
+                                  }
+                                  disabled={slot.animating}
+                                  style={{
+                                    fontSize: 11,
+                                    padding: "4px 6px",
+                                    borderRadius: "0 4px 4px 0",
+                                    border: "1px solid #6d28d9",
+                                    borderLeft: "none",
+                                    background: "#1f1035",
+                                    color: "#c4b5fd",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  <option value="kling">Kling 2.1</option>
+                                  <option value="wan26">Wan 2.6</option>
+                                </select>
+                              </div>
+                            </div>
                           )}
                         </div>
                       ))}
