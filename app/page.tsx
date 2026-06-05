@@ -521,9 +521,18 @@ const EMPTY_AI_IMAGE_SLOT = (): AIImageSlot => ({
 
 function buildAIImageGroups(
   sentences: string[],
-  hook: string
+  hook: string,
+  cta?: string
 ): AIImageGroup[] {
-  const allTexts = [hook, ...sentences].map((t) => t.trim()).filter(Boolean);
+  const hookSentences = splitHookIntoSentences(hook);
+  const allTexts = [...hookSentences, ...sentences]
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const ctaClean = stripTranslation(cta ?? "").trim();
+  if (ctaClean) {
+    const ctaSentences = splitHookIntoSentences(ctaClean);
+    allTexts.push(...ctaSentences);
+  }
   return allTexts.map((text) => {
     const { originalText, translation } = parseTranslation(text);
     return {
@@ -2354,7 +2363,7 @@ function HomePage() {
         footageError: null,
         footageLoading: false,
         manualGroups: [],
-        aiImageGroups: buildAIImageGroups(sentences, hook),
+        aiImageGroups: buildAIImageGroups(sentences, hook, script.cta),
         footagePage: 0,
       },
     }));
